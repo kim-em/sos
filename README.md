@@ -86,8 +86,12 @@ proof so it no longer depends on calling CSDP at compile time:
 example (x : ℝ) : 0 ≤ x^2 + 1 := by sos?
 -- Try this:
 --   [apply] sos_witness
---     { sigma0 := { squares := [CMvPolynomial.C (1 : ℚ), CMvPolynomial.X 0] }, sigmas := [] }
+--     { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ)),
+--                                   ((1 : ℚ), CMvPolynomial.X 0)] })] }
 ```
+
+Witness terms are `(c, p)` pairs interpreted as `c · p²`, with
+`0 ≤ c` enforced by `Certificate.checks`.
 
 Atoms are recovered as arbitrary `ℝ`-typed subterms (free variables,
 function applications, projections — anything the reifier doesn't
@@ -136,8 +140,10 @@ itself unless CompPoly is upstreamed first.
 
 - **Rational certificates only.** Witnesses live in
   `CMvPolynomial n ℚ` throughout. CSDP returns floats, which we round
-  against a denominator schedule (small ints, then powers of two up to
-  `2^20`) and decompose via rational LDLᵀ + Lagrange four-square.
+  against a denominator schedule (small ints, then powers of two up
+  to `2^24`) and decompose via rational LDLᵀ. Each σ-block is a
+  weighted sum of squares `Σᵢ cᵢ · pᵢ²` with `cᵢ ∈ ℚ≥0`; the
+  non-negativity is `decide +kernel`-checked at certificate time.
   There is no support for algebraic-extension coefficients — a goal
   whose only SOS witness involves `√2` (or any other irrational) is
   out of reach by construction.
@@ -167,18 +173,11 @@ itself unless CompPoly is upstreamed first.
 
 - **Search failure is not a soundness failure.** When CSDP returns an
   unusable status, when no rounding denominator validates, or when
-  LDLᵀ / four-square reconstruction can't close the certificate,
-  `by sos` reports "no certificate found" and leaves the goal open.
-  The `Certificate.checks` predicate that closes the goal is
+  LDLᵀ reconstruction can't close the certificate, `by sos` reports
+  "no certificate found" and leaves the goal open. The
+  `Certificate.checks` predicate that closes the goal is
   `decide +kernel`-checked against `Certificate n` data, so a proof
   that goes through is independent of CSDP correctness.
-
-- **The four-squares cap is the practical floor on `ε`.** Strict
-  positivity bounds smaller than `1/2^20 ≈ 10^-6` are out of reach
-  because `fourSquaresNat` brute-forces a Lagrange decomposition with
-  a cap at `n ≤ 2^20`. Lifting this requires a smarter four-squares
-  algorithm (e.g. Cornacchia / Pollard-style randomised search),
-  which is independent work.
 
 ## Building and testing
 
@@ -225,7 +224,8 @@ The tactic runs three stages on a `by sos` goal:
    hypothesis (drawn from `intro`-binders and the local context).
 2. `SOS.Search.runSearch` builds the Putinar-form SDP, calls CSDP,
    rounds the float Gram matrix to rationals, runs LDLᵀ, and
-   reconstructs squares — yielding a validated `SOS.Certificate n`.
+   reconstructs weighted-square terms — yielding a validated
+   `SOS.Certificate n`.
 3. `SOS.Tactic.closeSos` consumes the certificate and discharges the
    real-arithmetic goal via the matching soundness lemma in
    `SOS.Verifier`.
@@ -235,7 +235,7 @@ The tactic runs three stages on a `by sos` goal:
 | `SOS.Raw` | `Poly.Raw` and typed `Poly n` ASTs + reflection theorem. |
 | `SOS.Certificate` | `Goal n`, `SOSDecomp`, `Certificate n`, `checks` predicate. |
 | `SOS.Verifier` | `sos_sound`, `sos_strict_sound`, `sos_infeasible_sound`, plus `aeval_*` and `evalReal_eq_aeval` bridge lemmas. |
-| `SOS.LDL` | Rational LDLᵀ, Lagrange 4-square, Gram→SOS reconstruction. |
+| `SOS.LDL` | Rational LDLᵀ and Gram→weighted-square reconstruction. |
 | `SOS.Search` | Putinar-form SDP encoding, CSDP integration, rounding loop, LP-slack strict positivity. |
 | `SOS.Reify` | Atom-collecting Lean-`Expr` walker → `ParsedGoal` (atom array, untyped `SOS.Poly.Raw` for conclusion + constraints, hypothesis FVars). |
 | `SOS.Tactic` | `by sos` (search-driven) and `by sos_witness <cert>` elaborators. |

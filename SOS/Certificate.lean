@@ -24,14 +24,26 @@ def Poly.toCMv {n : Nat} : SOS.Poly n → CMvPolynomial n ℚ
   | .mul p q   => p.toCMv * q.toCMv
   | .pow p k   => p.toCMv ^ k
 
-/-- A list of polynomials whose sum-of-squares is the witness polynomial. -/
+/-- Weighted sum-of-squares decomposition: `Σᵢ cᵢ · pᵢ²`. Each `terms`
+entry is a pair `(c, p)` with `c ∈ ℚ`, interpreted as `c · p²`.
+
+Validity requires `0 ≤ cᵢ` for every entry; this is enforced by
+`Certificate.checks` via `SOSDecomp.coeffsNonneg`. Decide-checked at
+certificate time rather than carried as a propositional field — direct
+`sos_witness` users can hand-write certificates, so the verifier must
+not rely on the search maintaining the invariant. -/
 structure SOSDecomp (n : Nat) where
-  squares : List (CMvPolynomial n ℚ)
+  terms : List (ℚ × CMvPolynomial n ℚ)
   deriving Inhabited
 
-/-- The polynomial expansion of a sum-of-squares decomposition. -/
+/-- The polynomial expansion `Σᵢ cᵢ · pᵢ²` of a weighted sum-of-squares
+decomposition. -/
 def SOSDecomp.toPoly {n : Nat} (sd : SOSDecomp n) : CMvPolynomial n ℚ :=
-  sd.squares.foldr (fun q acc => acc + q * q) 0
+  sd.terms.foldr (fun pair acc => acc + CMvPolynomial.C pair.1 * pair.2 * pair.2) 0
+
+/-- All coefficients are non-negative; required for soundness. -/
+def SOSDecomp.coeffsNonneg {n : Nat} (sd : SOSDecomp n) : Bool :=
+  sd.terms.all (fun pair => decide (0 ≤ pair.1))
 
 /-- Goal shape with all data needed to reconstruct the soundness theorem
 appropriately. -/
@@ -108,43 +120,50 @@ def Certificate.indicesInBounds {n : Nat}
   sigmas.all fun pair => pair.1.all (· < gsLen)
 
 /-- Certificate validity check. Confirms every subset index is in
-`[0, gs.length)`, that `eqCofs` and `ps` line up, then checks the
-polynomial identity `goal.target = c.toPoly gs ps` via `decide +kernel`. -/
+`[0, gs.length)`, every σ block has non-negative coefficients, that
+`eqCofs` and `ps` line up, then checks the polynomial identity
+`goal.target = c.toPoly gs ps` via `decide +kernel`. -/
 def Certificate.checks {n : Nat} (c : Certificate n) (goal : Goal n)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) : Bool :=
   Certificate.indicesInBounds c.sigmas gs.length &&
+  c.sigmas.all (fun pair => pair.2.coeffsNonneg) &&
   (c.eqCofs.length == ps.length) &&
   decide (goal.target = c.toPoly gs ps)
 
 /-- Bridge lemma: `checks goal gs ps = true` is equivalent to the
-polynomial identity together with the bounds and length matches. -/
+polynomial identity together with the bounds, coefficient-nonnegativity,
+and length matches. -/
 theorem Certificate.checks_iff {n : Nat} (c : Certificate n) (goal : Goal n)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
     c.checks goal gs ps = true ↔
       Certificate.indicesInBounds c.sigmas gs.length = true ∧
+      (∀ pair ∈ c.sigmas, pair.2.coeffsNonneg = true) ∧
       c.eqCofs.length = ps.length ∧
       goal.target = c.toPoly gs ps := by
   unfold Certificate.checks
-  simp [decide_eq_true_eq, and_assoc]
+  simp [decide_eq_true_eq, and_assoc, List.all_eq_true]
 
 /-! ### Building certificates from `SOS.Poly`-form data
 
-The search produces `CMvPolynomial`-form squares; the elaborator
-decompiles each square back into a `SOS.Poly n` AST so it can be
-`ToExpr`-quoted into a Lean term. `Certificate.fromDecompiled` then
-maps the AST squares back through `SOS.Poly.toCMv` to assemble a
-`Certificate n`. -/
+The search produces `CMvPolynomial`-form weighted-square terms; the
+elaborator decompiles each term's polynomial back into a `SOS.Poly n`
+AST so it can be `ToExpr`-quoted into a Lean term. The rational
+coefficient is kept verbatim. `Certificate.fromDecompiled` then
+maps the AST polynomials back through `SOS.Poly.toCMv` to assemble
+a `Certificate n`. -/
 
-/-- Lift a `List (SOS.Poly n)` to a `SOSDecomp n` by mapping each
-entry through `SOS.Poly.toCMv`. -/
-def SOSDecomp.fromPolys {n : Nat} (squares : List (SOS.Poly n)) : SOSDecomp n :=
-  { squares := squares.map SOS.Poly.toCMv }
+/-- Lift a `List (ℚ × SOS.Poly n)` of weighted-square terms to a
+`SOSDecomp n` by mapping each polynomial through `SOS.Poly.toCMv`. -/
+def SOSDecomp.fromTerms {n : Nat}
+    (terms : List (ℚ × SOS.Poly n)) : SOSDecomp n :=
+  { terms := terms.map (fun pair => (pair.1, SOS.Poly.toCMv pair.2)) }
 
-/-- Build a `Certificate n` from `SOS.Poly`-keyed subset-indexed σ data. -/
+/-- Build a `Certificate n` from `SOS.Poly`-keyed subset-indexed σ data,
+where each σ-block is a list of weighted-square terms `(c, p)`. -/
 def Certificate.fromDecompiled {n : Nat}
-    (sigmasPolys : List (List Nat × List (SOS.Poly n)))
+    (sigmasPolys : List (List Nat × List (ℚ × SOS.Poly n)))
     (eqCofPolys : List (SOS.Poly n) := []) : Certificate n :=
-  { sigmas := sigmasPolys.map (fun pair => (pair.1, SOSDecomp.fromPolys pair.2)),
+  { sigmas := sigmasPolys.map (fun pair => (pair.1, SOSDecomp.fromTerms pair.2)),
     eqCofs := eqCofPolys.map SOS.Poly.toCMv }
 
 /-- Backward-compatible Putinar-shape builder: takes the original

@@ -2,14 +2,15 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 
-Rational LDLᵀ decomposition and Lagrange four-square decomposition.
+Rational LDLᵀ decomposition for weighted-square Gram reconstruction.
 
 These are pure executable algorithms. Their *output* is verified
-downstream (the certificate's polynomial identity is checked by
+downstream (the certificate's polynomial identity, and the
+non-negativity of each weighted-square coefficient, are checked by
 `decide +kernel` against `Certificate.checks`); no Lean-side
-correctness proofs are needed at this layer. If LDL fails (matrix is not strictly
-PSD on its diagonal pivots) or the four-square search fails, we
-return `none` and the search loop tries the next denominator.
+correctness proofs are needed at this layer. If LDL fails (matrix is
+not PSD on its diagonal pivots) we return `none` and the search loop
+tries the next denominator.
 -/
 import SOS.Certificate
 
@@ -88,65 +89,7 @@ def decompose (n : Nat) (Q : Array ℚ) : Option LDLT := Id.run do
         L := L.set! (i * n + j) (numer / djAcc)
   return some { n := n, L := L, D := D }
 
-/-! ### Lagrange four-square decomposition -/
-
-/-- Integer square root, lower-bound. -/
-def isqrt (n : Nat) : Nat := Id.run do
-  let mut k : Nat := 0
-  let mut bound : Nat := n
-  -- We're looking for the largest k with k² ≤ n. Try increasing.
-  while (k + 1) * (k + 1) ≤ bound do
-    k := k + 1
-  return k
-
-/-- Find naturals `a, b, c, d` with `a² + b² + c² + d² = n`. By Lagrange's
-four-square theorem this exists for every `n : ℕ`; we brute-force search.
-
-We cap `n` at `1 <<< 20` to bound the worst-case `O(n^(3/2))` inner-loop
-work to a few seconds. The search loop calls this (via
-`fourSquaresRat` → `LDL.reconstruct`) on `target_pivot.num · target_pivot.den`
-per LDL diagonal; huge `num · den` happens when CSDP rounding noise
-produces tiny pivots at large schedule denominators (the rounded
-value is "real noise rounded to a fine grid", not a genuine SOS
-coefficient). Giving up on those rounding attempts is the right
-semantics — the next denominator in the schedule is what we want to
-try. -/
-def fourSquaresNat (n : Nat) : Option (Nat × Nat × Nat × Nat) := Id.run do
-  if n > 1 <<< 20 then return none
-  let m := isqrt n
-  for d in [0:m+1] do
-    if d * d > n then break
-    for c in [0:d+1] do
-      if d * d + c * c > n then break
-      for b in [0:c+1] do
-        if d * d + c * c + b * b > n then break
-        let rem := n - d * d - c * c - b * b
-        let a := isqrt rem
-        if a * a == rem then
-          return some (a, b, c, d)
-  return none
-
-/-- Decompose a non-negative rational `r` as a sum of (at most four)
-rational squares. Returns the list of square roots. -/
-def fourSquaresRat (r : ℚ) : Option (List ℚ) := Id.run do
-  if r == 0 then return some []
-  if r < 0 then return none
-  let p := r.num
-  let q := (r.den : Int)
-  let pq := p * q
-  if pq < 0 then return none
-  match fourSquaresNat pq.toNat with
-  | none => return none
-  | some (a, b, c, d) =>
-    let qq : ℚ := (q : ℚ)
-    return some [
-      (a : ℚ) / qq,
-      (b : ℚ) / qq,
-      (c : ℚ) / qq,
-      (d : ℚ) / qq
-    ]
-
-/-! ### Reconstruction: Gram matrix → list of polynomial squares -/
+/-! ### Reconstruction: Gram matrix → list of weighted-square terms -/
 
 /-- Compute `Lᵀ · z`. The result has length `ldl.n`; element `i` is
 `Σ_k L[k,i] · z[k]`. -/
@@ -167,26 +110,23 @@ def transposeMulBasis {nVar : Nat} (ldl : LDLT)
   return some w
 
 /-- Given a PSD rational matrix `Q` and a basis polynomial vector `z`,
-produce a list of polynomial squares whose sum equals `zᵀ Q z`. -/
+produce a list of weighted-square terms `(Dᵢ, wᵢ)` representing
+`Σᵢ Dᵢ · wᵢ²ᵢ` where `D` is LDLᵀ's diagonal and `w = Lᵀ · z`. Pivots
+satisfy `Dᵢ ≥ 0` by `decompose`'s precondition; zero pivots are
+dropped. -/
 def reconstruct {nVar : Nat} (n : Nat) (Q : Array ℚ)
     (basis : Array (CMvPolynomial nVar ℚ)) :
-    Option (List (CMvPolynomial nVar ℚ)) := Id.run do
+    Option (List (ℚ × CMvPolynomial nVar ℚ)) := Id.run do
   if Q.size ≠ upperSize n then return none
   if basis.size ≠ n then return none
-  match decompose n Q with
-  | none => return none
-  | some ldl =>
-    let some w := transposeMulBasis ldl basis | return none
-    let mut squares : Array (CMvPolynomial nVar ℚ) := #[]
-    for i in [0:n] do
-      let Di := ldl.D[i]!
-      let some wi := w[i]? | return none
-      match fourSquaresRat Di with
-      | none => return none
-      | some coeffs =>
-        for c in coeffs do
-          if c ≠ 0 then
-            squares := squares.push (CMvPolynomial.C c * wi)
-    return some squares.toList
+  let some ldl := decompose n Q | return none
+  let some w := transposeMulBasis ldl basis | return none
+  let mut acc : Array (ℚ × CMvPolynomial nVar ℚ) := #[]
+  for i in [0:n] do
+    let Di := ldl.D[i]!
+    let some wi := w[i]? | return none
+    if Di ≠ 0 then
+      acc := acc.push (Di, wi)
+  return some acc.toList
 
 end SOS.LDL

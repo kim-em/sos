@@ -87,9 +87,10 @@ example (x : ℝ) : 0 < x^2 + 1/100 := by sos
 -- Multivariate, non-power-of-two denominator.
 example (x y : ℝ) : 0 < x^2 + y^2 + 1/500 := by sos
 
--- Tight strict positivity at the four-squares cap. `fourSquaresNat`
--- caps at `n ≤ 2^20`, putting a floor of `ε ≥ 1/2^20` on what we can
--- certify by this pipeline.
+-- Small strict-positivity slack: `1/2^20`. Historically this was the
+-- tightest the search could close because of an old `fourSquaresNat`
+-- decomposition cap; now the limiting factor is CSDP's float rounding,
+-- not the rationaliser.
 example (x : ℝ) : 0 < x^2 + 1/1048576 := by sos
 
 /-! ## §4. Constrained goals (Putinar quadratic module) -/
@@ -219,24 +220,24 @@ elaboration time, with no CSDP call — useful for committing a
 certificate that you don't want re-derived on every build. -/
 
 /-- info: Try this:
-  [apply] sos_witness { sigmas := [([], { squares := [CMvPolynomial.C (1 : ℚ), CMvPolynomial.X 0] })] }
+  [apply] sos_witness { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ)), ((1 : ℚ), CMvPolynomial.X 0)] })] }
 -/
 #guard_msgs in
 example (x : ℝ) : 0 ≤ x^2 + 1 := by sos?
 
 -- And the suggested replacement compiles:
 example (x : ℝ) : 0 ≤ x^2 + 1 := by
-  sos_witness { sigmas := [([], { squares := [CMvPolynomial.C (1 : ℚ), CMvPolynomial.X 0] })] }
+  sos_witness { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ)), ((1 : ℚ), CMvPolynomial.X 0)] })] }
 
 -- For strict positivity, the `Try this:` suggestion includes `with ε := …`.
 /-- info: Try this:
-  [apply] sos_witness { sigmas := [([], { squares := [CMvPolynomial.X 0] })] } with ε := (1 : ℚ)
+  [apply] sos_witness { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0)] })] } with ε := (1 : ℚ)
 -/
 #guard_msgs in
 example (x : ℝ) : 0 < x^2 + 1 := by sos?
 
 example (x : ℝ) : 0 < x^2 + 1 := by
-  sos_witness { sigmas := [([], { squares := [CMvPolynomial.X 0] })] } with ε := (1 : ℚ)
+  sos_witness { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0)] })] } with ε := (1 : ℚ)
 
 -- For boundary-tight strict goals (issue #46), `sos?` emits the
 -- replayable `sos_witness <cert> with exponent := <n>` form. The
@@ -248,12 +249,12 @@ example (x : ℝ) : 0 < x^2 + 1 := by
 -- `gs ++ [-p] = [x, -x²]`.
 example (x : ℝ) (_h : 0 < x) : 0 < x^2 := by
   sos_witness
-    { sigmas := [([1], { squares := [CMvPolynomial.C (1 : ℚ)] })] }
+    { sigmas := [([1], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ))] })] }
     with exponent := 2
 
 -- For equality goals the suggestion includes `eqCofs := …`.
 /-- info: Try this:
-  [apply] sos_witness { sigmas := [([], { squares := [] })], eqCofs := [CMvPolynomial.C (1 : ℚ)] }
+  [apply] sos_witness { sigmas := [([], { terms := [] })], eqCofs := [CMvPolynomial.C (1 : ℚ)] }
 -/
 #guard_msgs in
 example (x y : ℝ) (_h : x*y = 1) : 0 ≤ x*y - 1 := by sos?
@@ -265,28 +266,43 @@ example (x y : ℝ) (_hxy : x - y = 0) (_hy : y - 1 = 0) : 0 ≤ x - 1 := by
 /-! ### `sos_witness` direct use
 
 The witness elaborator also accepts certificates for constrained and
-infeasibility goals. (The cert structure must carry a `sigmas` entry
-per constraint to match `cert.checks`'s length check, even when the
-constraint isn't load-bearing.) -/
+infeasibility goals. Sigma entries are subset-indexed; their indices
+are bounds-checked against `gs.length` by `cert.checks`, but the
+list itself is sparse (no entry needed for a constraint the witness
+doesn't use). The `eqCofs` list, in contrast, is length-aligned with
+the equality constraints. -/
 
 -- Constrained — trivial witness, exercising the constraint structural check.
 example (x : ℝ) (_h : 0 ≤ x) : 0 ≤ x^2 := by
   sos_witness
-    { sigmas := [([], { squares := [CMvPolynomial.X 0] })] }
+    { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0)] })] }
 
 -- Infeasibility — `-1 = x² + 1·(-x² - 1)` proves the constraint set
 -- `{x² + 1 ≤ 0}` is infeasible.
 example (x : ℝ) : ¬ (x^2 + 1 ≤ 0) := by
   sos_witness
-    { sigmas := [([], { squares := [CMvPolynomial.X 0] }),
-                 ([0], { squares := [CMvPolynomial.C (1 : ℚ)] })] }
+    { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0)] }),
+                 ([0], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ))] })] }
 
 -- Combined inequality + equality: from `0 ≤ x − 1` and `x = 0` derive
 -- `False`. Certificate: `−1 = 0 + 1·(x − 1) + (−1)·x`.
 example (x : ℝ) (_hx : 0 ≤ x - 1) (_hxz : x = 0) : False := by
   sos_witness
-    { sigmas := [([0], { squares := [CMvPolynomial.C (1 : ℚ)] })],
+    { sigmas := [([0], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ))] })],
       eqCofs := [-CMvPolynomial.C (1 : ℚ)] }
+
+-- Negative-coefficient guard. The polynomial identity `−x² = (−1) · x²`
+-- holds exactly, but `coeffsNonneg` rejects the negative weight, so
+-- `Certificate.checks` returns `false` and `sos_witness` does NOT
+-- close this (false) goal. Without the `coeffsNonneg` check the
+-- witness elaborator would happily prove `0 ≤ −x²`.
+example : True := by
+  fail_if_success
+    (have : ∀ x : ℝ, 0 ≤ -x^2 := by
+      intro x
+      sos_witness
+        { sigmas := [([], { terms := [((-1 : ℚ), CMvPolynomial.X 0)] })] })
+  trivial
 
 /-! ## §9. Graceful failure & out-of-scope guards -/
 

@@ -643,12 +643,12 @@ small region and 1.5× interleaves catch Gram denominators that the
 old `[1..31] ++ [2^5..2^20]` schedule missed.
 
 Harrison's HOL Light caps at `2^66`; we cap at `2^24`. Beyond that
-range, CSDP rounding noise produces tiny positive `LDL` pivots whose
-`fourSquaresRat` decomposition is `O(√num · denom)` and exceeds
-practical wall time. The `maxRoundingDenom` field of `SOS.Config` (see
-`SOS/Tactic.lean`) filters the *full* candidate list — schedule entries,
-`polyDenom target`, constraint denoms, and cross denoms — against the
-cap. Targets needing a strictly larger denom fall through to
+range, the rational LDLᵀ pivots have very large numerators/denominators
+and the `decide +kernel` certificate check gets slow. The
+`maxRoundingDenom` field of `SOS.Config` (see `SOS/Tactic.lean`)
+filters the *full* candidate list — schedule entries, `polyDenom
+target`, constraint denoms, and cross denoms — against the cap.
+Targets needing a strictly larger denom fall through to
 `sos_witness <hand-cert>`. -/
 def niceDenominators : List ℚ :=
   let smalls : List ℚ := (List.range 63).map (fun i => (i + 1 : ℚ))
@@ -900,10 +900,10 @@ def tryDenominator (gs : List (CMvPolynomial n ℚ))
   for blockIdx in [0:blocks.size] do
     let some block := blocks[blockIdx]? | return none
     let some Q := Qs[blockIdx]? | return none
-    let some sigmaSquares :=
+    let some sigmaTerms :=
       LDL.reconstruct block.size Q (basisAsPolys block.basis)
       | return none
-    sigmas := sigmas.push (block.idxs, { squares := sigmaSquares })
+    sigmas := sigmas.push (block.idxs, { terms := sigmaTerms })
   let mut eqCofs : List (CMvPolynomial n ℚ) := []
   if hasEqs then
     let some xPosDiag := Qs[blocks.size]? | return none
@@ -1127,11 +1127,11 @@ private def tryReducedDenominator (block : BlockSpec n) (mats : Array (Array ℚ
   for i in [0:raw.size] do
     vec := vec.push (niceRound denom (raw.get! i))
   let some Q := reconstructReducedGram block.size mats vec | return none
-  let some sigma0Squares :=
+  let some sigma0Terms :=
     LDL.reconstruct block.size Q (basisAsPolys block.basis)
     | return none
   let cert : Certificate n :=
-    { sigmas := [([], { squares := sigma0Squares })], eqCofs := [] }
+    { sigmas := [([], { terms := sigma0Terms })], eqCofs := [] }
   if cert.checks goal [] [] then return some cert
   return none
 
@@ -1151,7 +1151,7 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
       basis := harrisonNewtonBasis target, multiplier := CMvPolynomial.C 1 }
   if block.size = 0 then
     if target = 0 then
-      return some { sigmas := [([], { squares := [] })], eqCofs := [] }
+      return some { sigmas := [([], { terms := [] })], eqCofs := [] }
     else
       return none
   let some (eqs, _monos) := symmetricPureEquations target block symmetries
@@ -1161,11 +1161,11 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
   if param.freeCols.isEmpty then
     let mats := gramMats block.size param
     let some Q := reconstructReducedGram block.size mats #[] | return none
-    let some sigma0Squares :=
+    let some sigma0Terms :=
       LDL.reconstruct block.size Q (basisAsPolys block.basis)
       | return none
     let cert : Certificate n :=
-      { sigmas := [([], { squares := sigma0Squares })], eqCofs := [] }
+      { sigmas := [([], { terms := sigma0Terms })], eqCofs := [] }
     if cert.checks goal [] [] then return some cert else return none
   let mats := gramMats block.size param
   let problem := buildReducedProblem block.size mats
@@ -1181,9 +1181,11 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
         return some cert
   return none
 
-private def constSOSDecomp? (r : ℚ) : Option (SOSDecomp n) := do
-  let roots ← LDL.fourSquaresRat r
-  return { squares := roots.map fun c => CMvPolynomial.C c }
+/-- Constant SOS multiplier from a non-negative rational, represented
+as a single weighted-square term `r · 1²`. -/
+private def constTermDecomp? (r : ℚ) : Option (SOSDecomp n) :=
+  if r < 0 then none
+  else some { terms := [(r, CMvPolynomial.C 1)] }
 
 /-- Exact rational fast path for certificates with constant SOS
 multipliers over the enumerated Schmüdgen products. This catches the
@@ -1219,7 +1221,7 @@ private def tryConstantProductCertificate (target : CMvPolynomial n ℚ)
   for i in [0:products.size] do
     let μ := sol.getD i 0
     if μ != 0 then
-      let some sigma := constSOSDecomp? (n := n) μ | return none
+      let some sigma := constTermDecomp? (n := n) μ | return none
       let product := products.getD i ([], 0)
       sigmas := sigmas.push (product.1, sigma)
   let cert : Certificate n := { sigmas := sigmas.toList, eqCofs := [] }
@@ -1244,7 +1246,7 @@ private def tryOneSdp (target : CMvPolynomial n ℚ)
       maxSubsetCardinality
   if problem.b.size = 0 then
     if target = 0 then
-      return some { sigmas := [([], { squares := [] })],
+      return some { sigmas := [([], { terms := [] })],
                     eqCofs := ps.map fun _ => CMvPolynomial.C 0 }
     else
       return none
@@ -1446,12 +1448,6 @@ private def readLambda (sol : CSDP.Solution) (lambdaBlockIdx : Nat) :
   | some (.diag _ entries) => if entries.size > 0 then entries.get! 0 else 0.0
   | none => 0.0
 
-/-- Constant SOS multiplier from a non-negative rational, represented
-as at most four constant polynomial squares. -/
-private def constSOS? (r : ℚ) : Option (SOSDecomp n) := do
-  let roots ← LDL.fourSquaresRat r
-  return { squares := roots.map fun c => CMvPolynomial.C c }
-
 /-- Return the affine coefficient vector and constant term of `p`, or
 `none` if `p` has a monomial of degree at least two. -/
 private def affineCoeffs? (p : CMvPolynomial n ℚ) :
@@ -1519,11 +1515,11 @@ private def tryAffineStrict (p : CMvPolynomial n ℚ)
         A := A.push row
         b := b.push (pCoeffs[j]!)
       let some sol := RatSimplex.findFeasibleEqLP? A b | continue
-      let some sigma0 ← constSOS? (sol[gs.length]!) | continue
+      let some sigma0 := constTermDecomp? (n := n) (sol[gs.length]!) | continue
       let mut sigmas : Array (List Nat × SOSDecomp n) := #[([], sigma0)]
       let mut ok := true
       for i in [0:gs.length] do
-        match constSOS? (sol[i]!) with
+        match constTermDecomp? (n := n) (sol[i]!) with
         | some sigma => sigmas := sigmas.push ([i], sigma)
         | none => ok := false
       if !ok then continue
@@ -1537,7 +1533,7 @@ private def tryAffineStrict (p : CMvPolynomial n ℚ)
 `λ*`, the largest slack admissible at this relaxation level. We then
 try `ε = 2^-k` for `k` chosen so that `2^-k ≲ λ*`, descending until a
 candidate certifies. Powers-of-two denominators keep the residual
-`p − ε` clean for the LDL + four-squares pipeline. The factor-2 slack
+`p − ε` clean for the LDL reconstruction pipeline. The factor-2 slack
 on `λ*` accounts for CSDP imprecision — when `λ*` is reported just
 below a clean power of two, we still try the natural largest `ε`.
 Returns `none` if CSDP fails, `λ* ≤ 1e-9`, or no candidate ε in the

@@ -32,7 +32,7 @@ open Lean Elab Tactic Meta
   per-call for hard targets.
 * `maxRoundingDenom` — upper cap on rounding-denominator candidates
   filtered against `SOS.Search.niceDenominators` (which itself tops out
-  at `2^20`). Raise for targets whose `polyDenom` exceeds the cap;
+  at `2^24`). Raise for targets whose `polyDenom` exceeds the cap;
   lower to fail faster on goals you know won't round cleanly.
 * `basisStrategy` — σ₀ basis pruning. `.newton` (default) uses
   Reznick's half-Newton-polytope test via an exact-rational simplex;
@@ -42,9 +42,9 @@ open Lean Elab Tactic Meta
 structure Config where
   /-- Iterative-deepening cap (see field docs above). -/
   maxDepth : Nat := 1
-  /-- Upper cap on rounding-denominator candidates. Raised to `2^24`
+  /-- Upper cap on rounding-denominator candidates. Defaults to `2^24`
   to give the preordering encoding (issue #38) room when product blocks
-  push the rounding pressure beyond `2^20`. -/
+  push the rounding pressure past the small-denominator region. -/
   maxRoundingDenom : Nat := 16777216
   /-- σ₀-basis pruning strategy. See field docs above. -/
   basisStrategy : SOS.Search.BasisStrategy := .newton
@@ -532,14 +532,16 @@ quoted via `SOS.Poly.decompile` so each square round-trips through
 `ToExpr (SOS.Poly n)`. -/
 private structure DecompiledCertificate (n : Nat) where
   /-- Subset-indexed σ blocks: each entry pairs the constraint-index
-  subset with the SOS decomposition's squares. The empty subset is σ₀;
-  singletons are Putinar σᵢ; higher cardinalities are Schmüdgen products. -/
-  sigmas : List (List Nat × List (SOS.Poly n))
+  subset with the SOS decomposition's weighted-square terms `(c, p)`
+  interpreted as `c · p²`. The empty subset is σ₀; singletons are
+  Putinar σᵢ; higher cardinalities are Schmüdgen products. -/
+  sigmas : List (List Nat × List (ℚ × SOS.Poly n))
   eqCofs : List (SOS.Poly n) := []
 
 private def decompileCertificate {n : Nat}
     (cert : SOS.Certificate n) : DecompiledCertificate n :=
-  { sigmas := cert.sigmas.map (fun pair => (pair.1, pair.2.squares.map SOS.Poly.decompile)),
+  { sigmas := cert.sigmas.map (fun pair =>
+      (pair.1, pair.2.terms.map (fun t => (t.1, SOS.Poly.decompile t.2)))),
     eqCofs := cert.eqCofs.map SOS.Poly.decompile }
 
 private def certExprOfDecompiled (n : Nat)
@@ -629,8 +631,18 @@ where
   formatComposite (parens : Bool) (s : String) : String :=
     if parens then s!"({s})" else s
 
-private def formatSquares {n : Nat} (sqs : List (SOS.Poly n)) : String :=
-  "[" ++ ", ".intercalate (sqs.map (fun p => formatPoly p)) ++ "]"
+/-- Render a `ℚ` as a Lean source literal: `(n : ℚ)` for integers,
+`((n : ℚ) / d)` otherwise. -/
+private def ratLit (r : Rat) : String :=
+  if r.den = 1 then s!"({r.num} : ℚ)"
+  else s!"(({r.num} : ℚ) / {r.den})"
+
+/-- Render a list of weighted-square terms `(c, p)` as a Lean source
+literal `[(c₀, p₀), (c₁, p₁), …]`. -/
+private def formatTerms {n : Nat}
+    (terms : List (ℚ × SOS.Poly n)) : String :=
+  "[" ++ ", ".intercalate
+    (terms.map (fun t => s!"({ratLit t.1}, {formatPoly t.2})")) ++ "]"
 
 /-- Render a subset of constraint indices as a Lean source literal
 `[i₀, i₁, …]`. -/
@@ -638,11 +650,11 @@ private def formatIdxs (idxs : List Nat) : String :=
   "[" ++ ", ".intercalate (idxs.map toString) ++ "]"
 
 /-- Render the subset-indexed σ list as a Lean source literal
-`[(idxs₀, { squares := … }), …]`. -/
+`[(idxs₀, { terms := … }), …]`. -/
 private def formatSigmasList {n : Nat}
-    (ds : List (List Nat × List (SOS.Poly n))) : String :=
+    (ds : List (List Nat × List (ℚ × SOS.Poly n))) : String :=
   let entries := ds.map fun pair =>
-    s!"({formatIdxs pair.1}, \{ squares := {formatSquares pair.2} })"
+    s!"({formatIdxs pair.1}, \{ terms := {formatTerms pair.2} })"
   "[" ++ ", ".intercalate entries ++ "]"
 
 /-- Render a list of polynomial cofactors as a Lean source literal

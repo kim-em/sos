@@ -155,17 +155,37 @@ private theorem aeval_sq_nonneg (φ : Fin n → ℝ) (q : CMvPolynomial n ℚ) :
   rw [CMvPolynomial.aeval_mul]
   exact mul_self_nonneg _
 
-/-- A sum of squares (built by `foldr (· + · * ·)` over a list of
-polynomials) evaluates to a non-negative real. -/
-theorem SOSDecomp.toPoly_aeval_nonneg (sd : SOSDecomp n) (φ : Fin n → ℝ) :
-    0 ≤ CMvPolynomial.aeval φ sd.toPoly := by
-  unfold SOSDecomp.toPoly
-  induction sd.squares with
+/-- Helper: a weighted sum of squares fold `Σᵢ cᵢ · pᵢ²` evaluates
+non-negatively when each coefficient `cᵢ` is non-negative. Induction
+on the list variable lets the coefficient hypothesis specialise
+through `cons`. -/
+private theorem foldr_weighted_squares_aeval_nonneg
+    (terms : List (ℚ × CMvPolynomial n ℚ)) (φ : Fin n → ℝ)
+    (hc : ∀ pair ∈ terms, 0 ≤ pair.1) :
+    0 ≤ CMvPolynomial.aeval φ
+      (terms.foldr (fun pair acc => acc + CMvPolynomial.C pair.1 * pair.2 * pair.2) 0) := by
+  induction terms with
   | nil =>
     rw [List.foldr_nil, CMvPolynomial.aeval_zero]
-  | cons q qs ih =>
-    rw [List.foldr_cons, CMvPolynomial.aeval_add]
-    exact add_nonneg ih (aeval_sq_nonneg φ q)
+  | cons pair rest ih =>
+    rw [List.foldr_cons, CMvPolynomial.aeval_add, CMvPolynomial.aeval_mul,
+        CMvPolynomial.aeval_mul, CMvPolynomial.aeval_C, mul_assoc]
+    have h_c_nn : (0 : ℝ) ≤ (algebraMap ℚ ℝ) pair.1 := by
+      show (0 : ℝ) ≤ ((pair.1 : ℝ))
+      exact_mod_cast hc pair List.mem_cons_self
+    refine add_nonneg
+      (ih fun pair' hp' => hc pair' (List.mem_cons_of_mem _ hp'))
+      (mul_nonneg h_c_nn (mul_self_nonneg _))
+
+/-- A weighted sum of squares `Σᵢ cᵢ · pᵢ²` evaluates non-negatively
+when every coefficient `cᵢ` is non-negative. -/
+theorem SOSDecomp.toPoly_aeval_nonneg (sd : SOSDecomp n)
+    (hc : sd.coeffsNonneg = true) (φ : Fin n → ℝ) :
+    0 ≤ CMvPolynomial.aeval φ sd.toPoly := by
+  unfold SOSDecomp.toPoly SOSDecomp.coeffsNonneg at *
+  rw [List.all_eq_true] at hc
+  exact foldr_weighted_squares_aeval_nonneg sd.terms φ
+    (fun pair hp => of_decide_eq_true (hc pair hp))
 
 /-- The product `∏_{i ∈ idxs} gs[i]` (or `1` for out-of-bounds entries)
 evaluates non-negatively when every `gᵢ` does. -/
@@ -192,10 +212,12 @@ theorem Certificate.constraintProduct_aeval_nonneg
       exact zero_le_one
 
 /-- The monoid sum `Σ_S σ_S.toPoly · ∏_{i ∈ S} gs[i]` evaluates
-non-negatively when every `gᵢ` does. -/
+non-negatively when every `gᵢ` does, given that every σ-block has
+non-negative coefficients. -/
 theorem Certificate.monoidSum_aeval_nonneg
     (sigmas : List (List Nat × SOSDecomp n))
     (gs : List (CMvPolynomial n ℚ)) (φ : Fin n → ℝ)
+    (hcoeffs : ∀ pair ∈ sigmas, pair.2.coeffsNonneg = true)
     (hgs : ∀ g ∈ gs, 0 ≤ CMvPolynomial.aeval φ g) :
     0 ≤ CMvPolynomial.aeval φ (Certificate.monoidSum sigmas gs) := by
   unfold Certificate.monoidSum
@@ -204,10 +226,11 @@ theorem Certificate.monoidSum_aeval_nonneg
     rw [List.foldr_nil, CMvPolynomial.aeval_zero]
   | cons pair rest ih =>
     rw [List.foldr_cons, CMvPolynomial.aeval_add, CMvPolynomial.aeval_mul]
-    refine add_nonneg ih ?_
-    exact mul_nonneg
-      (pair.2.toPoly_aeval_nonneg φ)
-      (Certificate.constraintProduct_aeval_nonneg gs pair.1 φ hgs)
+    refine add_nonneg (ih ?_) ?_
+    · intro pair' hp'; exact hcoeffs pair' (List.mem_cons_of_mem _ hp')
+    · refine mul_nonneg
+        (pair.2.toPoly_aeval_nonneg (hcoeffs pair List.mem_cons_self) φ)
+        (Certificate.constraintProduct_aeval_nonneg gs pair.1 φ hgs)
 
 /-- The equality cofactor sum `Σⱼ qⱼ · pⱼ` evaluates to zero whenever
 each `pⱼ` evaluates to zero. The cofactors `qⱼ` are unrestricted. -/
@@ -240,17 +263,19 @@ theorem Certificate.equalitySum_aeval_zero
 
 /-- The certificate's full expansion
 `Σ_S σ_S · ∏_{i ∈ S} gᵢ + Σⱼ qⱼ · pⱼ` evaluates non-negatively when
-every `gᵢ` is non-negative and every `pⱼ` is zero. -/
+every σ-block has non-negative coefficients, every `gᵢ` is
+non-negative, and every `pⱼ` is zero. -/
 theorem Certificate.toPoly_aeval_nonneg
     (c : Certificate n) (gs : List (CMvPolynomial n ℚ))
     (ps : List (CMvPolynomial n ℚ)) (φ : Fin n → ℝ)
+    (hcoeffs : ∀ pair ∈ c.sigmas, pair.2.coeffsNonneg = true)
     (hgs : ∀ g ∈ gs, 0 ≤ CMvPolynomial.aeval φ g)
     (hps : ∀ p ∈ ps, CMvPolynomial.aeval φ p = 0) :
     0 ≤ CMvPolynomial.aeval φ (c.toPoly gs ps) := by
   unfold Certificate.toPoly
   rw [CMvPolynomial.aeval_add,
       Certificate.equalitySum_aeval_zero c.eqCofs ps φ hps, add_zero]
-  exact Certificate.monoidSum_aeval_nonneg c.sigmas gs φ hgs
+  exact Certificate.monoidSum_aeval_nonneg c.sigmas gs φ hcoeffs hgs
 
 /-- **Soundness, closed positivity, with equality hypotheses.** -/
 theorem sos_sound
@@ -262,12 +287,12 @@ theorem sos_sound
       (∀ q ∈ ps, CMvPolynomial.aeval φ q = 0) →
       0 ≤ CMvPolynomial.aeval φ p := by
   intro φ hgs hps
-  obtain ⟨_hbounds, _hlenP, hid⟩ :=
+  obtain ⟨_hbounds, hcoeffs, _hlenP, hid⟩ :=
     (Certificate.checks_iff cert (.closed p) gs ps).mp h
   have htgt : (Goal.closed (n := n) p).target = p := rfl
   rw [htgt] at hid
   rw [hid]
-  exact cert.toPoly_aeval_nonneg gs ps φ hgs hps
+  exact cert.toPoly_aeval_nonneg gs ps φ hcoeffs hgs hps
 
 /-- **Soundness, strict positivity, with equality hypotheses.** -/
 theorem sos_strict_sound
@@ -280,12 +305,12 @@ theorem sos_strict_sound
       (∀ q ∈ ps, CMvPolynomial.aeval φ q = 0) →
       0 < CMvPolynomial.aeval φ p := by
   intro φ hgs hps
-  obtain ⟨_hbounds, _hlenP, hid⟩ :=
+  obtain ⟨_hbounds, hcoeffs, _hlenP, hid⟩ :=
     (Certificate.checks_iff cert (.strict p ε hε) gs ps).mp h
   have htgt : (Goal.strict (n := n) p ε hε).target = p - CMvPolynomial.C ε := rfl
   rw [htgt] at hid
   have h_diff : 0 ≤ CMvPolynomial.aeval φ (p - CMvPolynomial.C ε) := by
-    rw [hid]; exact cert.toPoly_aeval_nonneg gs ps φ hgs hps
+    rw [hid]; exact cert.toPoly_aeval_nonneg gs ps φ hcoeffs hgs hps
   rw [CMvPolynomial.aeval_sub, CMvPolynomial.aeval_C] at h_diff
   have hε_real : (0 : ℝ) < (algebraMap ℚ ℝ) ε := by
     show (0 : ℝ) < (ε : ℝ); exact_mod_cast hε
@@ -364,12 +389,12 @@ theorem sos_infeasible_sound
       (∀ q ∈ ps, CMvPolynomial.aeval φ q = 0) →
       False := by
   intro φ hgs hps
-  obtain ⟨_hbounds, _hlenP, hid⟩ :=
+  obtain ⟨_hbounds, hcoeffs, _hlenP, hid⟩ :=
     (Certificate.checks_iff cert (.infeasible (n := n)) gs ps).mp h
   have htgt : (Goal.infeasible (n := n)).target = -1 := rfl
   rw [htgt] at hid
   have h_neg_one_nonneg : (0 : ℝ) ≤ CMvPolynomial.aeval φ (-1 : CMvPolynomial n ℚ) := by
-    rw [hid]; exact cert.toPoly_aeval_nonneg gs ps φ hgs hps
+    rw [hid]; exact cert.toPoly_aeval_nonneg gs ps φ hcoeffs hgs hps
   rw [show ((-1 : CMvPolynomial n ℚ)) = -(1 : CMvPolynomial n ℚ) from rfl,
       CMvPolynomial.aeval_neg, CMvPolynomial.aeval_one] at h_neg_one_nonneg
   linarith

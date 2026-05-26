@@ -14,29 +14,20 @@ https://github.com/maksym-radziwill/BBR), reported on
 [Zulip](https://leanprover.zulipchat.com/#narrow/channel/423402-PrimeNumberTheorem.2B/topic/sum.20of.20squares.20tactic.3A.20seeking.20users/near/595692701)
 by Maksym Radziwill on 2026-05-18.
 
-Pre-fix: `by sos` returned `search failed to find a certificate`.
-The polynomial has integer coefficients up to `5.8 × 10¹²`, which
-forced LDLᵀ pivots whose `num · den` products were orders of
-magnitude above the old `fourSquaresNat` cap. The weighted-square
-certificate format (`Σᵢ cᵢ · pᵢ²` with `cᵢ ≥ 0`) drops the
-four-squares step entirely, but is not by itself enough to close
-BBR: even with the cap removed, no float Gram CSDP returns at
-depth-0 rounds to a rational matrix that exactly reproduces the
-target. Closing this needs either iterative deepening with a much
-larger basis (Harrison's `REAL_SOS` uses depth ≈ 10) or a wider
-denominator schedule (Harrison goes up to `2^66`). Both are
-follow-up work; see this file's `fail_if_success` below. -/
+This file pins the two structural pieces already in place — the
+weighted-square certificate format (PR #72) and the Harrison-style
+parameterised reduced encoding (this PR's `tryReducedPureSdp`
+generalisation) — but BBR still does not close. The remaining
+barrier is PSD-rounding margin: at every relaxation depth in the cap,
+CSDP returns a feasible float `y*` for the reduced parameter space,
+but rounding `y*` to any rational in the schedule produces a Gram
+just outside the PSD cone. Closing BBR needs shrinkage toward the
+analytic centre of the feasible set (a richer mitigation than the
+boundary `y* → 0` direction we currently expose), or a different SDP
+solver formulation that returns interior points.
 
--- BBR (degree 8 in 2 vars, integer coefficients up to ~5.8×10¹²) is
--- out of reach for `by sos` at the current relaxation depth and
--- denominator-schedule cap (`2^24`): every CSDP-returned float Gram,
--- when rounded against the schedule, fails to satisfy the polynomial
--- identity exactly. Eliminating the `fourSquaresNat` bottleneck (this
--- PR) was a structural prerequisite but is not sufficient on its
--- own — see Harrison's HOL Light `REAL_SOS` which closes BBR at
--- iterative-deepening depth ≈ 10 with denominators up to `2^66`.
--- Recorded as `fail_if_success` so the test suite captures the
--- regression target without blocking on it.
+Recorded as `fail_if_success` so the regression target is captured. -/
+
 example : True := by
   fail_if_success
     (have : ∀ x y : ℝ,

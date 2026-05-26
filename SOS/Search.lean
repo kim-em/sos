@@ -1063,9 +1063,12 @@ private def upperTriTrace (N : Nat) (M : Array ℚ) : ℚ := Id.run do
 /-- CSDP encoding of the reduced dual:
 `mats[0] + Σ qᵢ mats[i+1] ⪰ 0`. CSDP returns the reduced vector as the
 dual variable `y`. The objective is a trace extremum in reduced
-coordinates; currently this uses CSDP's dual minimisation direction,
-which is enough to expose rational boundary points in the covered
-`Z₂×Z₂` case. -/
+coordinates (CSDP's dual minimisation direction). This is the
+encoder for the Harrison-style parameterised pure-SOS path: any closed
+pure-SOS goal reaches this via `tryReducedPureSdp`, with the
+target-coefficient (and any Gram-symmetry) constraints already
+eliminated over `ℚ` so the rationalised reconstruction satisfies them
+by construction. -/
 private def buildReducedProblem (N : Nat) (mats : Array (Array ℚ)) :
     CSDP.Problem :=
   let freeCount := mats.size - 1
@@ -1135,28 +1138,38 @@ private def tryReducedDenominator (block : BlockSpec n) (mats : Array (Array ℚ
   if cert.checks goal [] [] then return some cert
   return none
 
-/-- Pure SOS search through the Harrison-style symmetry reduction:
-eliminate coefficient and Gram-symmetry equalities over `ℚ`, solve CSDP
-in the free orbit parameters, and round that small vector. -/
+/-- Harrison-style parameterised pure-SOS search: eliminate the
+target-coefficient (and Gram-symmetry, if any) equalities over `ℚ`,
+solve a reduced-dimension CSDP in the free parameters, and round that
+small vector. Reconstructing `Q = M₀ + Σ ŷₖ · Mₖ` from the rounded
+free vector exactly satisfies the polynomial identity by construction;
+only PSD has to land on a denominator-friendly point. -/
 private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
-    (useTraceCost : Bool) (extraDeg : Nat) (_strategy : BasisStrategy)
-    (maxRoundingDenom : Nat) (symmetries : Array (Array Nat)) :
+    (useTraceCost : Bool) (extraDeg : Nat) (strategy : BasisStrategy)
+    (maxRoundingDenom : Nat) (maxReducedGramVars : Nat)
+    (symmetries : Array (Array Nat)) :
     IO (Option (Certificate n)) := do
   if !useTraceCost then
     return none
-  if extraDeg ≠ 0 then
-    return none
+  let basisDeg := halfCeil target.totalDegree + extraDeg
+  let rawBasis := strategy.basisAt target basisDeg
+  let dropConstant := target.coeff (zeroMono n) = 0
+  let basisArr :=
+    if dropConstant then rawBasis.filter (· ≠ zeroMono n) else rawBasis
   let block : BlockSpec n :=
-    { idxs := [],
-      basis := harrisonNewtonBasis target, multiplier := CMvPolynomial.C 1 }
+    { idxs := [], basis := basisArr, multiplier := CMvPolynomial.C 1 }
   if block.size = 0 then
     if target = 0 then
       return some { sigmas := [([], { terms := [] })], eqCofs := [] }
     else
       return none
+  let numVars := upperTriCount block.size
+  if numVars > maxReducedGramVars then
+    -- ℚ Gauss-Jordan in `gramParam` would be too expensive at this
+    -- basis size. Outer search loop moves to the next iteration.
+    return none
   let some (eqs, _monos) := symmetricPureEquations target block symmetries
     | return none
-  let numVars := upperTriCount block.size
   let some param := gramParam numVars eqs | return none
   if param.freeCols.isEmpty then
     let mats := gramMats block.size param
@@ -1168,16 +1181,42 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
       { sigmas := [([], { terms := sigma0Terms })], eqCofs := [] }
     if cert.checks goal [] [] then return some cert else return none
   let mats := gramMats block.size param
-  let problem := buildReducedProblem block.size mats
+  -- Scale `mats[0]` (the particular solution that absorbs target
+  -- coefficients) by `1/scale` to keep CSDP's data range manageable
+  -- on targets with huge integer coefficients (BBR has ~5×10¹²).
+  -- The null-space basis `mats[k+1]` is unscaled. The recovered
+  -- `sol.y` is scaled back by `scale` before reconstruction, so the
+  -- final Gram exactly satisfies the original polynomial identity.
+  let mats0 := mats[0]!
+  let scale : ℚ := Id.run do
+    let mut m : ℚ := 1
+    for v in [0:mats0.size] do
+      let entry : ℚ := mats0[v]!
+      let a : ℚ := if entry < 0 then -entry else entry
+      if a > m then m := a
+    return m
+  let scaleFloat : Float := ratToFloat scale
+  let matsScaled : Array (Array ℚ) := Id.run do
+    let mut out := mats
+    let scaledZero := mats0.map (fun v => v / scale)
+    out := out.set! 0 scaledZero
+    return out
+  let problem := buildReducedProblem block.size matsScaled
   let sol := CSDP.solve problem
   if sol.ret ∉ [0, 3] then
     return none
+  -- Scale the recovered free vector back: `y_orig = scale * sol.y`.
+  let yOrig : FloatArray := Id.run do
+    let mut out : FloatArray := FloatArray.empty
+    for i in [0:sol.y.size] do
+      out := out.push (sol.y.get! i * scaleFloat)
+    return out
   let targetDenom : ℚ := (polyDenom target : ℚ)
   let denomCandidates : List ℚ := targetDenom :: niceDenominators
   let maxDenomQ : ℚ := (maxRoundingDenom : ℚ)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
-      if let some cert := tryReducedDenominator block mats sol.y d goal then
+      if let some cert := tryReducedDenominator block mats yOrig d goal then
         return some cert
   return none
 
@@ -1280,18 +1319,6 @@ private def tryOneSdp (target : CMvPolynomial n ℚ)
         return some cert
   return none
 
-/-- Fast path for unconstrained closed SOS goals.
-
-This is Harrison's `PURE_SOS` shape: with no inequality/equality
-hypotheses, solve the single `σ₀` SDP directly in pure-feasibility mode.
-That avoids the general search's trace-cost attempt and multiplier/product
-setup while still using the configured σ₀ basis strategy. -/
-private def tryDirectSos (target : CMvPolynomial n ℚ)
-    (goal : Goal n) (basisStrategy : BasisStrategy := .newton)
-    (maxRoundingDenom : Nat := 1048576) : IO (Option (Certificate n)) :=
-  tryOneSdp target [] [] goal (useTraceCost := false) (extraDeg := 0)
-    basisStrategy maxRoundingDenom (maxSubsetCardinality := 1)
-
 /-- Closed-positivity / infeasibility search: produce a Certificate
 proving `target = σ₀ + Σᵢ σᵢ · gᵢ + Σⱼ qⱼ · pⱼ` for the chosen `target`.
 The equality list `ps` may be empty.
@@ -1311,7 +1338,8 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (Certificate n)) := do
   -- Cost-matrix strategies, in order. Trace maximisation gives CSDP
   -- a well-defined central path on rank-deficient SDPs (Harrison's
@@ -1340,13 +1368,13 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
   let supportSize := target.monomials.length
   let dropConstant := target.coeff (zeroMono n) = 0
   let symmetries := SOS.Symmetry.detectSymmetries target gs ps
-  let useReducedPure := gs.isEmpty ∧ ps.isEmpty ∧ symmetries.size > 1
-  if gs.isEmpty ∧ ps.isEmpty ∧ !useReducedPure then
-    match goal with
-    | .closed _ =>
-      if let some cert ← tryDirectSos target goal basisStrategy maxRoundingDenom then
-        return some cert
-    | _ => pure ()
+  -- Pure closed-SOS goals (no constraints) take the Harrison-style
+  -- parameterised reduced encoding via `tryReducedPureSdp`: the
+  -- rationalised Gram exactly satisfies the polynomial identity by
+  -- construction. `.infeasible` and `.strict` keep using `tryOneSdp`
+  -- even when `gs`/`ps` are empty.
+  let isClosedGoal : Bool := match goal with | .closed _ => true | _ => false
+  let useReducedPure := gs.isEmpty && ps.isEmpty && isClosedGoal
   let pruneAllowed : Bool := match goal with
     | .infeasible => false
     | _           => basisStrategy ≠ .dense
@@ -1388,8 +1416,12 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
       for strat in basisStrategies do
         for useTraceCost in costStrategies do
           if useReducedPure then
+            -- Pure closed-SOS: ONLY the reduced encoding runs (no
+            -- dense fallback per iteration). Iterative deepening across
+            -- `extraDeg` and `basisStrategies` is the only recovery,
+            -- matching Harrison's `sumofsquares_general_symmetry`.
             if let some cert ← tryReducedPureSdp target goal useTraceCost extraDeg
-                strat maxRoundingDenom symmetries then
+                strat maxRoundingDenom maxReducedGramVars symmetries then
               return some cert
           else
             if let some cert ← tryOneSdp target gs ps goal useTraceCost extraDeg
@@ -1405,20 +1437,22 @@ def runFeasibilitySearch (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (Certificate n)) := do
   if let some (elimGoal, gs', ps', map) :=
       SOS.EqElim.eliminateEqualities goal gs ps then
     if ps'.length < ps.length then
       match (← runFeasibilitySearchCore elimGoal.target gs' ps' elimGoal
-          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality) with
+          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+          maxReducedGramVars) with
       | some cert =>
           let cert := SOS.EqElim.reconstructCertificate map cert
           if cert.checks goal gs ps then
             return some cert
       | none => pure ()
   runFeasibilitySearchCore target gs ps goal maxRoundingDenom maxDepth
-    basisStrategy maxSubsetCardinality
+    basisStrategy maxSubsetCardinality maxReducedGramVars
 
 /-! ### Strict positivity via LP-slack maximisation
 
@@ -1542,7 +1576,8 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
     (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (StrictResult n)) := do
   if let some cert := tryAffineStrict p gs ps maxRoundingDenom then
     return some cert
@@ -1599,7 +1634,8 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
         let targetPoly := p - CMvPolynomial.C ε
         match (← runFeasibilitySearch targetPoly gs ps goal maxRoundingDenom
             (maxDepth := extraDeg) (basisStrategy := basisStrategy)
-            (maxSubsetCardinality := maxSubsetCardinality)) with
+            (maxSubsetCardinality := maxSubsetCardinality)
+            (maxReducedGramVars := maxReducedGramVars)) with
         | some cert => return some { cert, ε, hε }
         | none => pure ()
   return none
@@ -1610,20 +1646,22 @@ def runStrict (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
     (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (StrictResult n)) := do
   if let some (elimGoal, gs', ps', map) :=
       SOS.EqElim.eliminateEqualities (.closed p) gs ps then
     if ps'.length < ps.length then
       match (← runStrictCore elimGoal.target gs' ps' maxRoundingDenom maxDepth
-          basisStrategy maxSubsetCardinality) with
+          basisStrategy maxSubsetCardinality maxReducedGramVars) with
       | some res =>
           let cert := SOS.EqElim.reconstructCertificate map res.cert
           let goal : Goal n := .strict p res.ε res.hε
           if cert.checks goal gs ps then
             return some { res with cert := cert }
       | none => pure ()
-  runStrictCore p gs ps maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+  runStrictCore p gs ps maxRoundingDenom maxDepth basisStrategy
+    maxSubsetCardinality maxReducedGramVars
 
 /-! ### Strict positivity via strict-product Positivstellensatz
 
@@ -1666,7 +1704,8 @@ def runStrictProduct (p : CMvPolynomial n ℚ)
     (strictIdxs : List Nat) (ps : List (CMvPolynomial n ℚ) := [])
     (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (StrictProductResult n)) := do
   -- No strict hypotheses ⇒ no structural strict-positivity witness; bail.
   if strictIdxs.isEmpty then return none
@@ -1694,7 +1733,8 @@ def runStrictProduct (p : CMvPolynomial n ℚ)
     let goal : Goal n := .closed target
     match (← runFeasibilitySearch target augGs ps goal maxRoundingDenom
         (maxDepth := maxDepth) (basisStrategy := basisStrategy)
-        (maxSubsetCardinality := maxSubsetCardinality)) with
+        (maxSubsetCardinality := maxSubsetCardinality)
+        (maxReducedGramVars := maxReducedGramVars)) with
     | some cert => return some { cert, strictGs, exponent := i }
     | none => pure ()
   return none
@@ -1708,15 +1748,16 @@ def runSearch (goal : Goal n) (gs : List (CMvPolynomial n ℚ))
     (ps : List (CMvPolynomial n ℚ) := [])
     (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1)
+    (maxReducedGramVars : Nat := 2500) :
     IO (Option (Certificate n)) := do
   match goal with
   | .closed p   =>
     runFeasibilitySearch p gs ps goal maxRoundingDenom maxDepth basisStrategy
-      maxSubsetCardinality
+      maxSubsetCardinality maxReducedGramVars
   | .infeasible =>
     runFeasibilitySearch (-1) gs ps goal maxRoundingDenom maxDepth basisStrategy
-      maxSubsetCardinality
+      maxSubsetCardinality maxReducedGramVars
   | .strict ..  => return none
 
 end SOS.Search

@@ -58,6 +58,14 @@ structure Config where
   explicitly for interval-Schur-style targets where products of three or
   more constraints are expected. -/
   maxSubsetCardinality : Nat := 2
+  /-- Upper cap on `numVars = upperTriCount basisSize` for the
+  Harrison-style reduced pure-SOS encoding (`tryReducedPureSdp`).
+  Above this size the exact-ℚ Gauss-Jordan in `gramParam` gets
+  expensive; the reduced path returns `none` and the outer search
+  loop moves to the next `(strat, useTraceCost, extraDeg)`. Default
+  covers basis sizes up to ~70 monomials. Raise per-call for
+  pure-SOS targets needing a wider σ₀ basis. -/
+  maxReducedGramVars : Nat := 2500
   deriving Inhabited
 
 /-- Elaborator for `(config := …)` clauses on `sos`/`sos?`. -/
@@ -717,6 +725,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
   let maxDepth := cfg.maxDepth
   let strategy := cfg.basisStrategy
   let maxCard := cfg.maxSubsetCardinality
+  let maxReducedVars := cfg.maxReducedGramVars
   match parsed.shape with
   | .closed =>
     let p ← parsedConclusionData s!"{tag} (closed)" parsed n
@@ -724,14 +733,16 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     match (← (SOS.Search.runSearch goal gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
         (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
+        (maxSubsetCardinality := maxCard)
+        (maxReducedGramVars := maxReducedVars) : IO _)) with
     | none => throwError "{tag}: search failed to find a certificate"
     | some cert => withFoundCert cert .closed none
   | .infeasible =>
     match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
         (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
+        (maxSubsetCardinality := maxCard)
+        (maxReducedGramVars := maxReducedVars) : IO _)) with
     | none => throwError "{tag}: search failed to find an infeasibility certificate"
     | some cert => withFoundCert cert .infeasible none
   | .strict =>
@@ -743,7 +754,8 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     match (← (SOS.Search.runStrict p.tree.toCMv gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
         (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
+        (maxSubsetCardinality := maxCard)
+        (maxReducedGramVars := maxReducedVars) : IO _)) with
     | some res =>
       let εE := Lean.toExpr res.ε
       let hεProof ← buildStrictHεProof εE
@@ -766,7 +778,8 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
       match (← (SOS.Search.runStrictProduct p.tree.toCMv gsCMv strictIdxs psCMv
           (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
           (basisStrategy := strategy)
-          (maxSubsetCardinality := maxCard) : IO _)) with
+          (maxSubsetCardinality := maxCard)
+          (maxReducedGramVars := maxReducedVars) : IO _)) with
       | none =>
         throwError "{tag}: search failed to find a strict-positivity certificate"
       | some res =>

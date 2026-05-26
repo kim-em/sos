@@ -113,10 +113,22 @@ example : True := by
 
 The soundness lemmas reduce to `IsSumSq.nonneg` (Mathlib) once the
 goal has been transported through the `aeval` ring-hom on CompPoly's
-`CMvPolynomial n ℚ`. Two design points worth flagging, both following
+`CMvPolynomial n ℚ`. Three design points worth flagging, all following
 Harrison's [TPHOLs 2007 paper]
 (https://link.springer.com/chapter/10.1007/978-3-540-74591-4_9):
 
+- **Parameterised pure-SOS encoding.** Closed pure-SOS goals (no
+  inequality or equality hypotheses) are solved via a Harrison-style
+  reduced SDP: target-coefficient equalities are eliminated over ℚ
+  before CSDP runs, so the rational Gram recovered from rounding
+  CSDP's free-parameter output exactly satisfies the polynomial
+  identity by construction. Only PSD has to land on a
+  denominator-friendly point. Iterative deepening across `extraDeg`
+  and basis strategies is the only recovery; there is no dense-Gram
+  fallback for pure SOS. The reduced ℚ Gauss-Jordan elimination is
+  gated by `Config.maxReducedGramVars` (default 2500), above which
+  the path returns `none` and the next iteration of the search loop
+  takes over.
 - **`min tr(X)` cost matrix.** CSDP's interior-point step has no
   preferred direction on a singleton boundary feasible set, so we
   give it the trace objective Harrison reports works empirically.

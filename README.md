@@ -141,7 +141,8 @@ itself unless CompPoly is upstreamed first.
 - **Rational certificates only.** Witnesses live in
   `CMvPolynomial n ℚ` throughout. CSDP returns floats, which we round
   against a denominator schedule (small ints, then powers of two up
-  to `2^24`) and decompose via rational LDLᵀ. Each σ-block is a
+  to `2^66`, capped per-call by `Config.maxRoundingDenom` whose
+  default is `2^24`) and decompose via rational LDLᵀ. Each σ-block is a
   weighted sum of squares `Σᵢ cᵢ · pᵢ²` with `cᵢ ∈ ℚ≥0`; the
   non-negativity is `decide +kernel`-checked at certificate time.
   There is no support for algebraic-extension coefficients — a goal

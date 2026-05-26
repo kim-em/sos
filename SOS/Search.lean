@@ -635,31 +635,34 @@ def buildSdp (target : CMvPolynomial n ℚ) (gs : List (CMvPolynomial n ℚ))
 /-- Schedule of denominators tried by the rational rounder, adapted from
 `sos.ml`'s `find_rounding`. First a dense small-integer region
 (`[1..63]`), then powers of two interleaved with their 1.5× scalings
-(`64, 96, 128, 192, 256, 384, …, 2^20`).
+(`64, 96, 128, 192, 256, 384, …, 2^66`).
 
 Harrison reports that "small ints first, then doubling" works
 empirically better than a strict doubling schedule — the densified
 small region and 1.5× interleaves catch Gram denominators that the
-old `[1..31] ++ [2^5..2^20]` schedule missed.
+plain `[1..31] ++ [2^5..2^66]` schedule he uses in HOL Light would
+miss.
 
-Harrison's HOL Light caps at `2^66`; we cap at `2^24`. Beyond that
-range, the rational LDLᵀ pivots have very large numerators/denominators
-and the `decide +kernel` certificate check gets slow. The
-`maxRoundingDenom` field of `SOS.Config` (see `SOS/Tactic.lean`)
-filters the *full* candidate list — schedule entries, `polyDenom
-target`, constraint denoms, and cross denoms — against the cap.
-Targets needing a strictly larger denom fall through to
-`sos_witness <hand-cert>`. -/
+The upper end matches Harrison's HOL Light schedule at `2^66`.
+`SOS.Search.niceRound` (and the exact-rational path it falls back to
+above `2^48`) handles candidates at this scale without saturation
+(PR #71). The `maxRoundingDenom` field of `SOS.Config` (see
+`SOS/Tactic.lean`) filters the candidate list — schedule entries,
+`polyDenom target`, constraint denoms, and cross denoms — against a
+caller-set cap (default `2^24`). Users targeting BBR-style
+boundary-tight Grams should opt into the wider range explicitly via
+`sos (config := { maxRoundingDenom := 1 <<< 66 })`. -/
 def niceDenominators : List ℚ :=
   let smalls : List ℚ := (List.range 63).map (fun i => (i + 1 : ℚ))
-  -- For k = 6..23, alternate `2^k` and `3·2^(k-1) = 1.5·2^k`; then `2^24`.
-  -- The extended range (past `2^20`) gives the Schmüdgen preordering
-  -- room for product-block Grams whose denominator grows with subset
-  -- cardinality (issue #38).
+  -- For k = 6..65, alternate `2^k` and `3·2^(k-1) = 1.5·2^k`; then
+  -- `2^66`. The extended range past `2^24` (the previous cap) lines
+  -- up with Harrison's HOL Light schedule, giving rounding more room
+  -- for targets whose float Gram lands far from a small-denom
+  -- rational point.
   let bigs : List ℚ :=
-    (List.range 18).flatMap
+    (List.range 60).flatMap
         (fun i => [(2 ^ (i + 6) : ℚ), ((3 : ℚ) * 2 ^ (i + 5))])
-      ++ [(2 ^ 24 : ℚ)]
+      ++ [(2 ^ 66 : ℚ)]
   smalls ++ bigs
 
 /-- Exact rational value of a finite, non-NaN `Float`. Decomposes `x`

@@ -15,28 +15,29 @@ https://github.com/maksym-radziwill/BBR), reported on
 by Maksym Radziwill on 2026-05-18.
 
 Pre-fix: `by sos` returned `search failed to find a certificate`.
-The polynomial has integer coefficients up to `5.8 × 10¹²`, which
-forced LDLᵀ pivots whose `num · den` products were orders of
-magnitude above the old `fourSquaresNat` cap. The weighted-square
-certificate format (`Σᵢ cᵢ · pᵢ²` with `cᵢ ≥ 0`) drops the
-four-squares step entirely, but is not by itself enough to close
-BBR: even with the cap removed, no float Gram CSDP returns at
-depth-0 rounds to a rational matrix that exactly reproduces the
-target. Closing this needs either iterative deepening with a much
-larger basis (Harrison's `REAL_SOS` uses depth ≈ 10) or a wider
-denominator schedule (Harrison goes up to `2^66`). Both are
-follow-up work; see this file's `fail_if_success` below. -/
+The polynomial has integer coefficients up to `5.8 × 10¹²`. The
+weighted-square certificate format (`Σᵢ cᵢ · pᵢ²` with `cᵢ ≥ 0`)
+dropped the four-squares bottleneck but was not enough on its own:
+no float Gram CSDP returns at depth-0 rounds to a rational matrix
+that exactly reproduces the target.
+
+Issue #75 added the Artin-form Positivstellensatz fallback (`sos
+(config := { maxArtinExponent := … })`), which proves `0 ≤ p` via a
+closed cert of `p^{2k+1}` against `gs ++ [−p]`. The structural path
+is now in place but the SDP conditioning for BBR — coefficients
+`O(5×10¹²)^{2k+1}` and bases of size hundreds — remains beyond CSDP's
+reach at the denominator schedule and depth we currently expose.
+Closing it for real likely needs both a wider denominator schedule
+(Harrison goes up to `2^66`) and a much larger relaxation depth. -/
 
 -- BBR (degree 8 in 2 vars, integer coefficients up to ~5.8×10¹²) is
--- out of reach for `by sos` at the current relaxation depth and
--- denominator-schedule cap (`2^24`): every CSDP-returned float Gram,
--- when rounded against the schedule, fails to satisfy the polynomial
--- identity exactly. Eliminating the `fourSquaresNat` bottleneck (this
--- PR) was a structural prerequisite but is not sufficient on its
--- own — see Harrison's HOL Light `REAL_SOS` which closes BBR at
--- iterative-deepening depth ≈ 10 with denominators up to `2^66`.
--- Recorded as `fail_if_success` so the test suite captures the
--- regression target without blocking on it.
+-- still out of reach for `by sos`, even with the Artin-form
+-- Positivstellensatz fallback enabled. Recorded as `fail_if_success`
+-- so the test suite captures the regression target without blocking
+-- on it. The infrastructure (issue #75) is in place — once the
+-- denominator schedule and relaxation depth grow to Harrison's
+-- `REAL_SOS` levels, flip this to a direct `by sos (config := {
+-- maxArtinExponent := 7 })`.
 example : True := by
   fail_if_success
     (have : ∀ x y : ℝ,

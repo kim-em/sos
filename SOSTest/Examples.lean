@@ -252,6 +252,37 @@ example (x : ℝ) (_h : 0 < x) : 0 < x^2 := by
     { sigmas := [([1], { terms := [((1 : ℚ), CMvPolynomial.C (1 : ℚ))] })] }
     with exponent := 2
 
+-- For closed non-negativity goals (issue #75), `sos_witness <cert>
+-- with exponent := <odd n>` dispatches to the Artin-form
+-- Positivstellensatz close path: cert verifies the polynomial identity
+-- `p^n = σ_cert(gs ++ [−p], ps)` for an odd `n`, and the soundness
+-- theorem closes `0 ≤ p` by contradiction on `p < 0` (odd-power-of-
+-- negative). Here the minimal cert at `n = 1` is `σ_{[]} = x²`,
+-- contributing `1 · x² = x²` against `gs ++ [-p] = [-x²]`.
+example (x : ℝ) : 0 ≤ x^2 := by
+  sos_witness
+    { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0)] })] }
+    with exponent := 1
+
+-- Higher odd exponent. At `n = 3`, the identity is `(x²)³ = x⁶ =
+-- σ_{[]}` with `σ_{[]} = (x³)²`. The closed-Artin soundness path
+-- rules out `x² < 0` via the odd power being negative.
+example (x : ℝ) : 0 ≤ x^2 := by
+  sos_witness
+    { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0 ^ 3)] })] }
+    with exponent := 3
+
+-- Even-exponent rejection: the odd-power-of-negative contradiction
+-- only goes through for odd `n`, so the witness elaborator refuses
+-- even exponents on closed goals.
+/-- error: sos_witness: Artin-form exponent must be odd (got 2)
+-/
+#guard_msgs in
+example (x : ℝ) : 0 ≤ x^2 := by
+  sos_witness
+    { sigmas := [([], { terms := [((1 : ℚ), CMvPolynomial.X 0 ^ 2)] })] }
+    with exponent := 2
+
 -- For equality goals the suggestion includes `eqCofs := …`.
 /-- info: Try this:
   [apply] sos_witness { sigmas := [([], { terms := [] })], eqCofs := [CMvPolynomial.C (1 : ℚ)] }

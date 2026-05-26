@@ -380,6 +380,45 @@ theorem sos_strict_product_sound
     pow_pos h_pol_pos exponent
   linarith
 
+/-- **Soundness, closed non-negativity via Artin-form Positivstellensatz.**
+
+To prove `0 ≤ p` against ≥-constraints `gs` and =-constraints `ps`, we ask
+for a closed certificate of the polynomial `p^exponent` (with `exponent`
+odd) against the *augmented* inequality list `gs ++ [−p]`. Under the
+contrapositive `p < 0`, the augmented constraint `−p ≥ 0` is satisfied,
+so `sos_sound` gives `0 ≤ aeval φ (p^exponent) = (aeval φ p)^exponent`.
+But an odd power of a negative real is negative, giving a contradiction.
+
+Equivalent to Harrison's `REAL_SOS` Positivstellensatz form
+`σ₀ + σ₁·(−p) + … = p^{2k+1}`, where `σ₀` is the σ-block for the empty
+constraint subset, `σ₁` is the σ-block for the singleton `{−p}`, and the
+remaining σ-blocks index into `gs ++ [−p]`. -/
+theorem sos_closed_artin_sound
+    (p : CMvPolynomial n ℚ) (exponent : Nat) (h_odd : exponent % 2 = 1)
+    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+    (cert : Certificate n)
+    (h : cert.checks (.closed (p ^ exponent)) (gs ++ [-p]) ps = true) :
+    ∀ φ : Fin n → ℝ,
+      (∀ g ∈ gs, 0 ≤ CMvPolynomial.aeval φ g) →
+      (∀ q ∈ ps, CMvPolynomial.aeval φ q = 0) →
+      0 ≤ CMvPolynomial.aeval φ p := by
+  intro φ hgs hps
+  by_contra h_neg
+  rw [not_le] at h_neg
+  have h_negp_nonneg : 0 ≤ CMvPolynomial.aeval φ (-p) := by
+    rw [CMvPolynomial.aeval_neg]; linarith
+  have hgs_aug : ∀ g ∈ gs ++ [-p], 0 ≤ CMvPolynomial.aeval φ g := by
+    intro g hg
+    rcases List.mem_append.mp hg with hin | hin
+    · exact hgs g hin
+    · have heq : g = -p := List.mem_singleton.mp hin
+      rw [heq]; exact h_negp_nonneg
+  have h_res := sos_sound _ _ _ _ h φ hgs_aug hps
+  rw [CMvPolynomial.aeval_pow] at h_res
+  have h_pow_neg : (CMvPolynomial.aeval φ p) ^ exponent < 0 :=
+    (Nat.odd_iff.mpr h_odd).pow_neg h_neg
+  linarith
+
 /-- **Soundness, infeasibility refutation, with equality hypotheses.** -/
 theorem sos_infeasible_sound
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))

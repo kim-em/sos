@@ -1699,6 +1699,50 @@ def runStrictProduct (p : CMvPolynomial n ℚ)
     | none => pure ()
   return none
 
+/-! ### Closed non-negativity via Artin-form Positivstellensatz
+
+For closed targets `0 ≤ p` that no plain SoS certificate of `p` against
+`gs` can close, Harrison's `REAL_SOS` deepens iteratively along the Artin
+form `p^{2k+1} = σ₀ + σ₁·(−p) + …` (Putinar against `gs ++ [−p]`). At
+`k = 0` the cert recovers the plain `p ≥ 0` proof but with `−p` available
+as an extra constraint; higher odd exponents grow the search space.
+`sos_closed_artin_sound` discharges the resulting cert into `0 ≤ p` by
+contradiction on the assumption `p < 0` (odd-power-of-negative). -/
+
+/-- Closed-nonnegativity Artin-form certificate output bundle. `exponent`
+is the odd integer `2k+1` at which the augmented-system closed certificate
+of `p^exponent` against `gs ++ [−p]` succeeded. -/
+structure ArtinResult (n : Nat) where
+  cert : Certificate n
+  exponent : Nat
+
+/-- Closed-nonnegativity search via Artin-form Positivstellensatz.
+Iterates the odd exponent `e ∈ {1, 3, 5, …}` up to `maxExponent`, asking
+the standard closed-goal `runFeasibilitySearch` for a certificate of
+`p^e` against the augmented inequality list `gs ++ [−p]`. The `−p` entry
+gives the cert a contrapositive handle that plain SoS lacks. Returns
+`none` if no odd exponent in the budget produces a verifiable certificate. -/
+def runClosedArtin (p : CMvPolynomial n ℚ)
+    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (basisStrategy : BasisStrategy := .newton)
+    (maxSubsetCardinality : Nat := 1)
+    (maxExponent : Nat := 11) :
+    IO (Option (ArtinResult n)) := do
+  let augGs := gs ++ [-p]
+  -- Map `k ∈ [0..maxExponent/2]` to odd exponents `2k+1`.
+  for k in [0:maxExponent / 2 + 1] do
+    let exponent := 2 * k + 1
+    if exponent > maxExponent then break
+    let target := p ^ exponent
+    let goal : Goal n := .closed target
+    match (← runFeasibilitySearch target augGs ps goal maxRoundingDenom
+        (maxDepth := maxDepth) (basisStrategy := basisStrategy)
+        (maxSubsetCardinality := maxSubsetCardinality)) with
+    | some cert => return some { cert, exponent }
+    | none => pure ()
+  return none
+
 /-- Closed/infeasibility search dispatcher. Owns the `Goal → target`
 translation (`p` for `.closed`, `-1` for `.infeasible`). Strict
 positivity has its own entry point: `runStrict`; the `.strict` arm

@@ -58,6 +58,16 @@ structure Config where
   explicitly for interval-Schur-style targets where products of three or
   more constraints are expected. -/
   maxSubsetCardinality : Nat := 2
+  /-- Maximum odd exponent for the closed Artin-form Positivstellensatz
+  fallback (`runClosedArtin`, issue #75). When the standard closed-positivity
+  search returns no certificate, the Artin path iterates odd exponents
+  `e = 1, 3, …, maxArtinExponent` and asks for a closed cert of `p^e`
+  against the augmented inequality list `gs ++ [−p]`. Each exponent costs
+  a fresh CSDP solve at degree `e · deg p`, so the default `0` keeps the
+  fallback disabled — opt in per call (`sos (config := { maxArtinExponent
+  := 7 })`) for boundary-tight non-negativity targets like BBR Lemma 7.2
+  where the plain SoS path fails. -/
+  maxArtinExponent : Nat := 0
   deriving Inhabited
 
 /-- Elaborator for `(config := …)` clauses on `sos`/`sos?`. -/
@@ -517,6 +527,55 @@ def closeSosStrictProduct (parsed : SOS.Reify.ParsedGoal)
   mv.assign final
   Tactic.replaceMainGoal []
 
+/-- Closed-nonnegativity Artin-form close: discharges `0 ≤ p` via
+`sos_closed_artin_sound`, where the certificate verifies the closed
+identity `p^exponent = σ_cert((gs ++ [−p]), ps)` for an odd `exponent`.
+Mirrors `closeSosStrictProduct` but the augmenting constraint is just
+`{−p}` and the target is `p^exponent` instead of `−pol^exponent`. -/
+def closeSosClosedArtin (parsed : SOS.Reify.ParsedGoal)
+    (certE : Expr) (exponent : Nat) :
+    TacticM Unit := Tactic.withMainContext do
+  let n := parsed.atoms.size
+  let nE := Lean.mkNatLit n
+  let mv ← Tactic.getMainGoal
+  let φE ← buildFinValExpr parsed.atoms
+  let bridged ← buildHypothesisAevalProofsA n φE parsed.constraints
+  let gsListE ← gsCMvListExpr n bridged.ineqPolys
+  let psListE ← gsCMvListExpr n bridged.eqPolys
+  let hgsProof ← buildForallMemProof n φE bridged.ineqPolys bridged.ineqProofs
+  let hpsProof ← buildForallMemEqZeroProof n φE bridged.eqPolys bridged.eqProofs
+  let p ← parsedConclusionData "sos" parsed n
+  -- Augmented inequality list `gs ++ [-p]`. The certificate's σ subsets
+  -- index into this list (with `-p` at the last position).
+  let cmvTy ← cmvType n
+  let negPE ← mkAppM ``Neg.neg #[p.cmv]
+  let nilE ← mkAppOptM ``List.nil #[some cmvTy]
+  let singletonE ← mkAppOptM ``List.cons #[some cmvTy, some negPE, some nilE]
+  let augGsListE ← mkAppM ``HAppend.hAppend #[gsListE, singletonE]
+  -- Target polynomial: `p^exponent`.
+  let expE := Lean.mkNatLit exponent
+  let powE ← mkAppM ``HPow.hPow #[p.cmv, expE]
+  let goalE ← mkAppOptM ``SOS.Goal.closed #[some nE, some powE]
+  let decProof ← buildCheckProof certE goalE augGsListE psListE
+  -- `h_odd : exponent % 2 = 1` discharged by `decide +kernel`.
+  let twoE := Lean.mkNatLit 2
+  let oneE := Lean.mkNatLit 1
+  let modE ← mkAppM ``HMod.hMod #[expE, twoE]
+  let oddType ← mkEq modE oneE
+  let oddProof ← buildDecideTrue oddType
+  let hTarget ← mkAppM ``SOS.sos_closed_artin_sound
+    #[p.cmv, expE, oddProof, gsListE, psListE, certE, decProof, φE,
+      hgsProof, hpsProof]
+  let eqProof_p ← buildAtomicBridgeEq n φE p.tree p.orig
+  let pE := Lean.toExpr p.tree
+  let hNonneg ← mkAppOptM ``SOS.nonneg_orig_of_aeval
+    #[some nE, some φE, some pE, some p.orig, some eqProof_p, some hTarget]
+  let final ←
+    if p.useSubBridge then mkAppM ``le_of_sub_nonneg #[hNonneg]
+    else pure hNonneg
+  mv.assign final
+  Tactic.replaceMainGoal []
+
 /-! ### Tactic surface -/
 
 syntax (name := sosTactic) "sos" Lean.Parser.Tactic.optConfig : tactic
@@ -725,8 +784,32 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
         (basisStrategy := strategy)
         (maxSubsetCardinality := maxCard) : IO _)) with
-    | none => throwError "{tag}: search failed to find a certificate"
     | some cert => withFoundCert cert .closed none
+    | none =>
+      -- Fall through to the closed Artin-form Positivstellensatz when
+      -- the user has enabled it via `maxArtinExponent > 0`. Each odd
+      -- exponent costs a fresh CSDP solve at degree `e · deg p`, so the
+      -- fallback is opt-in.
+      if cfg.maxArtinExponent = 0 then
+        throwError "{tag}: search failed to find a certificate"
+      else
+        match (← (SOS.Search.runClosedArtin p.tree.toCMv gsCMv psCMv
+            (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+            (basisStrategy := strategy)
+            (maxSubsetCardinality := maxCard)
+            (maxExponent := cfg.maxArtinExponent) : IO _)) with
+        | none => throwError "{tag}: search failed to find a certificate"
+        | some res =>
+          let decompiled := decompileCertificate res.cert
+          if let some tk := suggest? then
+            let certText := formatDecompiledCertificate decompiled
+            let suggestion :=
+              s!"sos_witness {certText} with exponent := {res.exponent}"
+            let sugg : Lean.Meta.Tactic.TryThis.Suggestion :=
+              { suggestion := .string suggestion }
+            Lean.Meta.Tactic.TryThis.addSuggestion tk sugg
+          let certE ← certExprOfDecompiled n decompiled
+          closeSosClosedArtin parsed certE res.exponent
   | .infeasible =>
     match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
@@ -1041,30 +1124,37 @@ private def runSosWitness (cert : Term)
   | _, some _ =>
     throwError "sos_witness: `with ε := …` is only valid on strict-positivity goals"
 
-/-- Shared body of `sos_witness <cert> with exponent := <n>`, the
-witness form for strict-product Positivstellensatz certificates
-(issue #46). Elaborates the certificate against the parsed goal,
-verifies the parsed shape is `.strict`, and dispatches to
-`closeSosStrictProduct`. -/
-private def runSosWitnessStrictProduct (cert : Term) (expN : Nat) :
+/-- Shared body of `sos_witness <cert> with exponent := <n>`. Dispatches
+on the parsed goal shape:
+* `.strict` → strict-product Positivstellensatz (issue #46), via
+  `closeSosStrictProduct`.
+* `.closed` → Artin-form Positivstellensatz (issue #75), via
+  `closeSosClosedArtin`. -/
+private def runSosWitnessExponent (cert : Term) (expN : Nat) :
     TacticM Unit := do
   let some parsed ← SOS.Reify.parseGoalAtomic |
     throwError "sos_witness: goal not in supported fragment"
-  unless parsed.shape matches .strict do
-    throwError
-      "sos_witness: `with exponent := <nat>` is only valid on strict-positivity goals"
   let n := parsed.atoms.size
   let certTy ← mkAppOptM ``SOS.Certificate #[some (Lean.mkNatLit n)]
   let certE ← Term.elabTermEnsuringType cert certTy
   Term.synthesizeSyntheticMVarsNoPostponing
   let certE ← instantiateMVars certE
-  closeSosStrictProduct parsed certE expN
+  match parsed.shape with
+  | .strict => closeSosStrictProduct parsed certE expN
+  | .closed =>
+    unless expN % 2 = 1 do
+      throwError
+        "sos_witness: Artin-form exponent must be odd (got {expN})"
+    closeSosClosedArtin parsed certE expN
+  | .infeasible =>
+    throwError
+      "sos_witness: `with exponent := <nat>` is not supported for infeasibility goals"
 
 elab_rules : tactic
   | `(tactic| sos_witness $cert:term) => runSosWitness cert none
   | `(tactic| sos_witness $cert:term with ε := $eps:term) =>
       runSosWitness cert (some eps)
   | `(tactic| sos_witness $cert:term with exponent := $expN:num) =>
-      runSosWitnessStrictProduct cert expN.getNat
+      runSosWitnessExponent cert expN.getNat
 
 end SOS

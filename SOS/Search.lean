@@ -1183,10 +1183,14 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
   let mats := gramMats block.size param
   -- Scale `mats[0]` (the particular solution that absorbs target
   -- coefficients) by `1/scale` to keep CSDP's data range manageable
-  -- on targets with huge integer coefficients (BBR has ~5×10¹²).
-  -- The null-space basis `mats[k+1]` is unscaled. The recovered
-  -- `sol.y` is scaled back by `scale` before reconstruction, so the
-  -- final Gram exactly satisfies the original polynomial identity.
+  -- on targets with huge integer coefficients. `mats[k+1]` is the
+  -- (typically small) null-space basis and is left unscaled.
+  -- Recovered `sol.y` is scaled back by `scale` before
+  -- reconstruction. Harrison's uniform `scale_then` (`sos.ml:634`)
+  -- doesn't directly apply: our particular solution `mats[0]` and
+  -- the null-space basis `mats[k+1]` differ in magnitude by the
+  -- target's coefficient scale, so uniform scaling can't condition
+  -- both at once.
   let mats0 := mats[0]!
   let scale : ℚ := Id.run do
     let mut m : ℚ := 1
@@ -1205,7 +1209,6 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
   let sol := CSDP.solve problem
   if sol.ret ∉ [0, 3] then
     return none
-  -- Scale the recovered free vector back: `y_orig = scale * sol.y`.
   let yOrig : FloatArray := Id.run do
     let mut out : FloatArray := FloatArray.empty
     for i in [0:sol.y.size] do

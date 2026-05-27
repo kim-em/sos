@@ -30,11 +30,11 @@ open Lean Elab Tactic Meta
   largest value with no measurable wall-clock cost over `0`, and the
   depth-1 retry unlocks the discriminant identity among others. Raise
   per-call for hard targets.
-* `maxRoundingDenom` — upper cap on rounding-denominator candidates
-  filtered against `SOS.Search.niceDenominators` (which itself tops out
-  at `2^66`, Harrison's `find_rounding` schedule; the default cap of
-  `2^24` filters it). Raise for targets whose `polyDenom` exceeds the
-  cap; lower to fail faster on goals you know won't round cleanly.
+* `maxRoundingDenomLog2` — base-2 log of the cap on rounding-denominator
+  candidates, filtered against `SOS.Search.niceDenominators`. The cap is
+  `2 ^ maxRoundingDenomLog2`; the default exponent `66` is Harrison's
+  `find_rounding` ceiling. Lower it to fail faster on goals you know
+  won't round cleanly (e.g. `{ maxRoundingDenomLog2 := 40 }`).
 * `basisStrategy` — σ₀ basis pruning. `.newton` (default) uses
   Reznick's half-Newton-polytope test via an exact-rational simplex;
   `.dense` disables pruning entirely. A `.dense` fallback runs at
@@ -43,10 +43,10 @@ open Lean Elab Tactic Meta
 structure Config where
   /-- Iterative-deepening cap (see field docs above). -/
   maxDepth : Nat := 1
-  /-- Upper cap on rounding-denominator candidates. Defaults to `2^24`
-  to give the preordering encoding (issue #38) room when product blocks
-  push the rounding pressure past the small-denominator region. -/
-  maxRoundingDenom : Nat := 16777216
+  /-- Base-2 log of the rounding-denominator cap; the cap is
+  `2 ^ maxRoundingDenomLog2`. Default exponent `66` matches Harrison's
+  HOL Light `find_rounding` (which has no artificial cap below `2^66`). -/
+  maxRoundingDenomLog2 : Nat := 66
   /-- σ₀-basis pruning strategy. See field docs above. -/
   basisStrategy : SOS.Search.BasisStrategy := .newton
   /-- Internal performance knob for the constraint-product monoid (Schmüdgen
@@ -755,7 +755,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
       emitSosSuggestion tk (formatDecompiledCertificate decompiled) ε?
     let certE ← certExprOfDecompiled n decompiled
     closeSos parsed certE mode
-  let maxDenom := cfg.maxRoundingDenom
+  let maxDenomLog2 := cfg.maxRoundingDenomLog2
   let maxDepth := cfg.maxDepth
   let strategy := cfg.basisStrategy
   let maxCard := cfg.maxSubsetCardinality
@@ -764,7 +764,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     let p ← parsedConclusionData s!"{tag} (closed)" parsed n
     let goal : SOS.Goal n := .closed p.tree.toCMv
     match (← (SOS.Search.runSearch goal gsCMv psCMv
-        (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
         (basisStrategy := strategy)
         (maxSubsetCardinality := maxCard) : IO _)) with
     | some cert => withFoundCert cert .closed none
@@ -784,7 +784,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
       -- benefits from the `−1` target when the cone is just `{−p ≥ 0}`.
       if gsCMv.isEmpty ∧ psCMv.isEmpty then
         match (← (SOS.Search.runClosedRefutation p.tree.toCMv gsCMv psCMv
-            (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+            (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
             (basisStrategy := strategy)
             (maxSubsetCardinality := maxCard) : IO _)) with
         | some cert =>
@@ -796,7 +796,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
         throwError "{tag}: search failed to find a certificate"
   | .infeasible =>
     match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
-        (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
         (basisStrategy := strategy)
         (maxSubsetCardinality := maxCard) : IO _)) with
     | none => throwError "{tag}: search failed to find an infeasibility certificate"
@@ -808,7 +808,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     -- Positivstellensatz (Harrison `REAL_NONLINEAR_PROVER`), which
     -- closes boundary-tight strict goals where no ε exists.
     match (← (SOS.Search.runStrict p.tree.toCMv gsCMv psCMv
-        (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
         (basisStrategy := strategy)
         (maxSubsetCardinality := maxCard) : IO _)) with
     | some res =>
@@ -831,7 +831,7 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
           | .eq => pure ()
         return idxs.toList
       match (← (SOS.Search.runStrictProduct p.tree.toCMv gsCMv strictIdxs psCMv
-          (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+          (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
           (basisStrategy := strategy)
           (maxSubsetCardinality := maxCard) : IO _)) with
       | none =>

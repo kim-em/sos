@@ -13,25 +13,25 @@ import SOS
 
 open SOS CPoly
 
-/-! ### Rounding-denominator schedule (#15, extended in #38, #77)
+/-! ### Rounding-denominator schedule (#15, extended in #38, #77, #66)
 
-The schedule is `[1..63]` followed by alternating `2^k`,
-`3·2^(k-1)` for `k = 6..65`, then `2^66`. PR #77 extended the upper
-end from `2^24` to `2^66` to match Harrison's HOL Light
-`find_rounding` schedule; the `maxRoundingDenom` config field
-(default `2^24`) filters this list at the call site, so default
-behaviour is unchanged. -/
+The schedule is exactly Harrison's `sos.ml` `find_rounding`:
+`map num (1--31) @ map pow2 (5--66)`, i.e. `[1..31]` followed by the
+pure powers `2^5, …, 2^66`. The `maxRoundingDenomLog2` config field
+(default exponent `66`, i.e. `2^66`, matching Harrison) caps this list
+at the call site. -/
 
-#guard SOS.Search.niceDenominators.length = 63 + 60 * 2 + 1
-#guard (SOS.Search.niceDenominators.take 63) =
-    ((List.range 63).map (fun i => (i + 1 : ℚ)))
-#guard (SOS.Search.niceDenominators.drop 63).take 6 =
-    [(64 : ℚ), 96, 128, 192, 256, 384]
+#guard SOS.Search.niceDenominators.length = 31 + 62
+#guard (SOS.Search.niceDenominators.take 31) =
+    ((List.range 31).map (fun i => (i + 1 : ℚ)))
+#guard (SOS.Search.niceDenominators.drop 31).take 6 =
+    [(32 : ℚ), 64, 128, 256, 512, 1024]
 #guard SOS.Search.niceDenominators.getLast? = some ((2 ^ 66 : ℚ))
 
--- Densified region was absent from the old `[1..31] ++ [2^5..2^20]`.
-#guard SOS.Search.niceDenominators.contains (45 : ℚ)
-#guard SOS.Search.niceDenominators.contains (96 : ℚ)
+-- Pure powers only — the densified `3·2^(k-1)` entries are gone.
+#guard SOS.Search.niceDenominators.contains (31 : ℚ)
+#guard SOS.Search.niceDenominators.contains ((2 ^ 5 : ℚ))
+#guard !SOS.Search.niceDenominators.contains (96 : ℚ)
 
 /-! ### `niceRound` regression: large-denominator precision
 

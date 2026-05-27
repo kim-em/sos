@@ -769,21 +769,30 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     | some cert => withFoundCert cert .closed none
     | none =>
       -- Fall through to the i=0 strict-refutation Positivstellensatz:
-      -- search for `−1 = σ₀ + Σ σᵢ·gsᵢ + σ·(−p)`, which proves the stronger
-      -- `0 < p` (hence `0 ≤ p`). This is Harrison's mechanism for
-      -- boundary-tight non-negativity (e.g. BBR Lemma 7.2); the `−1` target
-      -- is far better conditioned than the original `p` target. Tried by
-      -- default after plain SOS fails — it adds one CSDP solve per hard
-      -- closed goal but is sound (a false `−1` certificate is impossible).
-      match (← (SOS.Search.runClosedRefutation p.tree.toCMv gsCMv psCMv
-          (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
-          (basisStrategy := strategy)
-          (maxSubsetCardinality := maxCard) : IO _)) with
-      | some cert =>
-        let decompiled := decompileCertificate cert
-        let certE ← certExprOfDecompiled n decompiled
-        closeSosClosedRefutation parsed certE
-      | none => throwError "{tag}: search failed to find a certificate"
+      -- search for `−1 = σ₀ + σ₁·(−p)`, which proves the stronger `0 < p`
+      -- (hence `0 ≤ p`). This is Harrison's mechanism for boundary-tight
+      -- non-negativity (e.g. BBR Lemma 7.2); the `−1` target is far better
+      -- conditioned than the original `p` target.
+      --
+      -- Scoped to *unconstrained* closed goals (no `gs`/`ps`): BBR and its
+      -- kin have no hypotheses, and this keeps the extra CSDP solve off the
+      -- failure path of constrained goals (which carry their own
+      -- hypotheses, e.g. the div/mod lift). `closeSosClosedRefutation`
+      -- relies on this — it builds `sos_strict_product_sound` with the
+      -- bridged hypotheses, but the augmented-system search/round only
+      -- benefits from the `−1` target when the cone is just `{−p ≥ 0}`.
+      if gsCMv.isEmpty ∧ psCMv.isEmpty then
+        match (← (SOS.Search.runClosedRefutation p.tree.toCMv gsCMv psCMv
+            (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+            (basisStrategy := strategy)
+            (maxSubsetCardinality := maxCard) : IO _)) with
+        | some cert =>
+          let decompiled := decompileCertificate cert
+          let certE ← certExprOfDecompiled n decompiled
+          closeSosClosedRefutation parsed certE
+        | none => throwError "{tag}: search failed to find a certificate"
+      else
+        throwError "{tag}: search failed to find a certificate"
   | .infeasible =>
     match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)

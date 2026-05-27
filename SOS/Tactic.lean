@@ -32,8 +32,9 @@ open Lean Elab Tactic Meta
   per-call for hard targets.
 * `maxRoundingDenom` — upper cap on rounding-denominator candidates
   filtered against `SOS.Search.niceDenominators` (which itself tops out
-  at `2^24`). Raise for targets whose `polyDenom` exceeds the cap;
-  lower to fail faster on goals you know won't round cleanly.
+  at `2^66`, Harrison's `find_rounding` schedule; the default cap of
+  `2^24` filters it). Raise for targets whose `polyDenom` exceeds the
+  cap; lower to fail faster on goals you know won't round cleanly.
 * `basisStrategy` — σ₀ basis pruning. `.newton` (default) uses
   Reznick's half-Newton-polytope test via an exact-rational simplex;
   `.dense` disables pruning entirely. A `.dense` fallback runs at

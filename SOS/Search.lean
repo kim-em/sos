@@ -2041,6 +2041,11 @@ def runClosedRefutation (p : CMvPolynomial n ℚ)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (Certificate n)) := do
+  -- The reduced refutation encoder does not thread equality cofactors:
+  -- `tryReducedSchmudgenSdp` has no `ps` parameter and checks its
+  -- certificate against `[]`. Rather than silently return a certificate
+  -- that cannot check against a nonempty `ps`, reject that case up front.
+  if !ps.isEmpty then return none
   let augGs := gs ++ [-p]
   -- Target `−(strictProductPoly [])^1 = −(1)^1 = −1`, written in the exact
   -- form `sos_strict_product_sound` expects for `strictGs = []`, `exp = 1`.

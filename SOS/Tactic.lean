@@ -517,6 +517,47 @@ def closeSosStrictProduct (parsed : SOS.Reify.ParsedGoal)
   mv.assign final
   Tactic.replaceMainGoal []
 
+def closeSosClosedRefutation (parsed : SOS.Reify.ParsedGoal)
+    (certE : Expr) :
+    TacticM Unit := Tactic.withMainContext do
+  let n := parsed.atoms.size
+  let nE := Lean.mkNatLit n
+  let mv ← Tactic.getMainGoal
+  let φE ← buildFinValExpr parsed.atoms
+  let bridged ← buildHypothesisAevalProofsA n φE parsed.constraints
+  let gsListE ← gsCMvListExpr n bridged.ineqPolys
+  let psListE ← gsCMvListExpr n bridged.eqPolys
+  let hgsProof ← buildForallMemProof n φE bridged.ineqPolys bridged.ineqProofs
+  let hpsProof ← buildForallMemEqZeroProof n φE bridged.eqPolys bridged.eqProofs
+  let p ← parsedConclusionData "sos" parsed n
+  let cmvTy ← cmvType n
+  let negPE ← mkAppM ``Neg.neg #[p.cmv]
+  let nilE ← mkAppOptM ``List.nil #[some cmvTy]
+  let singletonE ← mkAppOptM ``List.cons #[some cmvTy, some negPE, some nilE]
+  let augGsListE ← mkAppM ``HAppend.hAppend #[gsListE, singletonE]
+  -- `strictGs = []`, `exponent = 1`; target `−(strictProductPoly [])^1 = −1`.
+  let strictGsListE := nilE
+  let hStrictProof ← buildForallMemStrictProof n φE [] []
+  let expE := Lean.mkNatLit 1
+  let strictProdE ← mkAppOptM ``SOS.strictProductPoly #[some nE, some strictGsListE]
+  let powE ← mkAppM ``HPow.hPow #[strictProdE, expE]
+  let negPowE ← mkAppM ``Neg.neg #[powE]
+  let goalE ← mkAppOptM ``SOS.Goal.closed #[some nE, some negPowE]
+  let decProof ← buildCheckProof certE goalE augGsListE psListE
+  let hTarget ← mkAppM ``SOS.sos_strict_product_sound
+    #[p.cmv, strictGsListE, expE, gsListE, psListE, certE, decProof, φE,
+      hgsProof, hpsProof, hStrictProof]
+  let eqProof_p ← buildAtomicBridgeEq n φE p.tree p.orig
+  let pE := Lean.toExpr p.tree
+  let hPos ← mkAppOptM ``SOS.pos_orig_of_aeval
+    #[some nE, some φE, some pE, some p.orig, some eqProof_p, some hTarget]
+  let hNonneg ← mkAppM ``le_of_lt #[hPos]
+  let final ←
+    if p.useSubBridge then mkAppM ``le_of_sub_nonneg #[hNonneg]
+    else pure hNonneg
+  mv.assign final
+  Tactic.replaceMainGoal []
+
 /-! ### Tactic surface -/
 
 syntax (name := sosTactic) "sos" Lean.Parser.Tactic.optConfig : tactic
@@ -725,8 +766,24 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
         (basisStrategy := strategy)
         (maxSubsetCardinality := maxCard) : IO _)) with
-    | none => throwError "{tag}: search failed to find a certificate"
     | some cert => withFoundCert cert .closed none
+    | none =>
+      -- Fall through to the i=0 strict-refutation Positivstellensatz:
+      -- search for `−1 = σ₀ + Σ σᵢ·gsᵢ + σ·(−p)`, which proves the stronger
+      -- `0 < p` (hence `0 ≤ p`). This is Harrison's mechanism for
+      -- boundary-tight non-negativity (e.g. BBR Lemma 7.2); the `−1` target
+      -- is far better conditioned than the original `p` target. Tried by
+      -- default after plain SOS fails — it adds one CSDP solve per hard
+      -- closed goal but is sound (a false `−1` certificate is impossible).
+      match (← (SOS.Search.runClosedRefutation p.tree.toCMv gsCMv psCMv
+          (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)
+          (basisStrategy := strategy)
+          (maxSubsetCardinality := maxCard) : IO _)) with
+      | some cert =>
+        let decompiled := decompileCertificate cert
+        let certE ← certExprOfDecompiled n decompiled
+        closeSosClosedRefutation parsed certE
+      | none => throwError "{tag}: search failed to find a certificate"
   | .infeasible =>
     match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
         (maxRoundingDenom := maxDenom) (maxDepth := maxDepth)

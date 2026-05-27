@@ -1372,34 +1372,30 @@ private def multiBlockReconstructGram (blocks : Array (BlockSpec n))
       Qs := Qs.set! b Q'
   return some Qs
 
-/-- Outcome of attempting one denominator in the multi-block reduced
-encoding. Tagged so the orchestrator can distinguish PSD failure from
-polynomial-identity failure for diagnostics. -/
-private inductive SchmudgenDenomResult (n : Nat) where
-  | reconFail
-  | ldlFail (atBlock : Nat)
-  | checksFail (cert : Certificate n)
-  | ok (cert : Certificate n)
-
+/-- Attempt one denominator in the multi-block reduced encoding: round
+the float dual, reconstruct the per-block Gram, LDL-decompose each block,
+and keep the certificate iff it checks. Returns `none` on any failure
+(reconstruction shape mismatch, non-PSD block, or a failed
+polynomial-identity check). -/
 private def tryReducedSchmudgenDenominator (blocks : Array (BlockSpec n))
     (mats : Array (Array (Array ℚ))) (raw : FloatArray) (denom : ℚ)
     (goal : Goal n) (gs : List (CMvPolynomial n ℚ)) (gIdxs : Array (List Nat)) :
-    SchmudgenDenomResult n := Id.run do
+    Option (Certificate n) := Id.run do
   let mut vec : Array ℚ := #[]
   for i in [0:raw.size] do
     vec := vec.push (niceRound denom (raw.get! i))
   let some Qs := multiBlockReconstructGram blocks mats vec
-    | return .reconFail
+    | return none
   let mut sigmas : List (List Nat × SOSDecomp n) := []
   for b in [0:blocks.size] do
     let block := blocks[b]!
     let Q := Qs[b]!
     let some terms := LDL.reconstruct block.size Q (basisAsPolys block.basis)
-      | return .ldlFail b
+      | return none
     sigmas := sigmas.concat (gIdxs[b]!, { terms })
   let cert : Certificate n := { sigmas, eqCofs := [] }
-  if cert.checks goal gs [] then return .ok cert
-  return .checksFail cert
+  if cert.checks goal gs [] then return some cert
+  return none
 
 private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (goal : Goal n)
@@ -1451,7 +1447,6 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
   let scaleQ : ℚ := if maxEntry > twoTo20Q then twoTo20Q / maxEntry else 1
   let matsScaled : Array (Array (Array ℚ)) :=
     mats.map (fun perBlock => perBlock.map (fun M => M.map (· * scaleQ)))
-  let scaleFloat : Float := 1.0  -- uniform: no inverse scaling needed
   let problem := buildMultiBlockReducedProblem blocks matsScaled
   -- Scale the objective vector so its max |entry| lands near `2^20`.
   -- Pure cost scaling doesn't change the argmin but improves CSDP's
@@ -1465,12 +1460,10 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
     { problem with b := problem.b.map (· * objScale) }
   let sol := CSDP.solve problem
   if sol.ret ∉ [0, 3] then return none
-  let yOrig : FloatArray := Id.run do
-    let mut out : FloatArray := FloatArray.empty
-    for i in [0:sol.y.size] do
-      out := out.push (sol.y.get! i * scaleFloat)
-    return out
-  let _ := scaleFloat
+  -- The matrix scaling above is uniform (a single power-of-two `scaleQ`
+  -- on every entry), which preserves the feasible set and the argmin, so
+  -- the dual `sol.y` is already the original problem's solution — no
+  -- inverse scaling on `y` is needed.
   let targetDenom : ℚ := (polyDenom target : ℚ)
   let constraintDenoms : List ℚ := gs.map fun g => (polyDenom g : ℚ)
   let crossDenoms : List ℚ := gs.map fun g => (polyDenom (target * g) : ℚ)
@@ -1480,9 +1473,8 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
   let gIdxs : Array (List Nat) := blocks.map (fun b => b.idxs)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
-      match tryReducedSchmudgenDenominator blocks mats yOrig d goal gs gIdxs with
-      | .ok cert => return some cert
-      | _ => pure ()
+      if let some cert := tryReducedSchmudgenDenominator blocks mats sol.y d goal gs gIdxs then
+        return some cert
   return none
 
 

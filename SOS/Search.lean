@@ -1184,6 +1184,300 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
         return some cert
   return none
 
+
+/-! ### Multi-block Schmüdgen reduced encoding
+
+Harrison's `real_positivnullstellensatz_general` (`sos.ml:1018`) builds
+a multi-block free-parameter SDP: one PSD block per Schmüdgen monoid
+element (the σᵢ blocks), polynomial-identity equations eliminated
+over `ℚ` before CSDP runs. The polynomial identity is satisfied *by
+construction*, so CSDP sees a pure PSD problem with no equality
+constraints, and rounding only needs the recovered Gram to stay PSD.
+
+`tryReducedPureSdp` already implements this for the **single-block**
+case (pure SOS, σ₀ only). The functions below generalise to **any
+number of blocks**, so the same architecture handles constrained
+Schmüdgen targets `target = σ₀ + Σᵢ σᵢ · gᵢ`. This is the path that
+closes BBR Lemma 7.2 via the closed strict-refutation
+(`runClosedRefutation`): the refutation `−1 = σ₀ + σ₁ · (−P)` is a
+two-block Schmüdgen problem (basis 21 for σ₀, basis 3 for σ₁ against
+`g = −P`), exactly Harrison's HOL Light d=10 `[21, 3]` solve. -/
+
+private def blockOffsets (blocks : Array (BlockSpec n)) : Array Nat := Id.run do
+  let mut offs : Array Nat := #[]
+  let mut acc : Nat := 0
+  for b in blocks do
+    offs := offs.push acc
+    acc := acc + upperTriCount b.size
+  offs
+
+private def totalReducedVars (blocks : Array (BlockSpec n)) : Nat :=
+  blocks.foldl (fun acc b => acc + upperTriCount b.size) 0
+
+/-- Polynomial-identity equations for a multi-block Schmüdgen Gram
+parameterisation. Variables are concatenated upper-triangle entries
+across all blocks; equation `m` reads
+`target.coeff(m) = Σ_b Σ_{i≤j} f_ij · blockProduct(b,i,j).coeff(m) · Q^b_{ij}`,
+where `f_ij = 1` if `i = j` else `2`.
+Returns `(rows, monos)` with `rows : Array (numVars+1)`-arrays
+(last column is the RHS = target's coefficient on that monomial) and
+`monos` the union of monomials touched. -/
+private def multiBlockEquations (target : CMvPolynomial n ℚ)
+    (blocks : Array (BlockSpec n)) :
+    Array (Array ℚ) × Array (CMvMonomial n) := Id.run do
+  let offsets := blockOffsets blocks
+  let numVars := totalReducedVars blocks
+  let mut monos : Array (CMvMonomial n) := #[]
+  let mut monoIndex : Std.TreeMap (CMvMonomial n) Nat compare := {}
+  for m in target.monomials do
+    if !monoIndex.contains m then
+      monoIndex := monoIndex.insert m monos.size
+      monos := monos.push m
+  -- Walk the blocks and accumulate the (b, i, j, support) tuples.
+  let mut cached : Array (Nat × Nat × Nat × Array (CMvMonomial n × ℚ)) := #[]
+  for b in [0:blocks.size] do
+    let block := blocks[b]!
+    let N := block.size
+    for i in [0:N] do
+      for j in [i:N] do
+        let prod := blockProduct block i j
+        let mut support : Array (CMvMonomial n × ℚ) := #[]
+        for m in prod.monomials do
+          let c := prod.coeff m
+          if c ≠ 0 then
+            support := support.push (m, c)
+            if !monoIndex.contains m then
+              monoIndex := monoIndex.insert m monos.size
+              monos := monos.push m
+        cached := cached.push (b, i, j, support)
+  let mut rows : Array (Array ℚ) := #[]
+  for m in monos do
+    let mut row : Array ℚ := Array.replicate (numVars + 1) 0
+    for (b, i, j, support) in cached do
+      for (m', c) in support do
+        if m' = m then
+          let factor : ℚ := if i = j then 1 else 2
+          let blockN := blocks[b]!.size
+          let idx := offsets[b]! + upperTriIndex blockN i j
+          row := addVarCoeff row idx (factor * c)
+    row := row.set! numVars (target.coeff m)
+    rows := rows.push row
+  return (rows, monos)
+
+/-- Build the per-block reduced Gram matrices from a multi-block
+`GramParam`. Returns an `Array (Array (Array ℚ))` indexed as
+`mats[k][b]`: the `k`-th matrix in the SDP encoding (`k = 0` is the
+particular solution, `k ≥ 1` are the null-space basis vectors), and
+within each, `b` indexes the block. Each `mats[k][b]` is upper-triangle
+packed of size `upperTriCount(blocks[b].size)`. -/
+private def multiBlockGramMats (blocks : Array (BlockSpec n)) (param : GramParam) :
+    Array (Array (Array ℚ)) := Id.run do
+  let offsets := blockOffsets blocks
+  let nBlocks := blocks.size
+  let blockSizes : Array Nat := blocks.map (fun b => upperTriCount b.size)
+  -- For each free-col index k (or k=0 for constant), build per-block
+  -- matrix of zeros and fill in.
+  let mkPerBlock : Array (Array ℚ) := blockSizes.map (Array.replicate · 0)
+  let mut mats : Array (Array (Array ℚ)) :=
+    Array.replicate (param.freeCols.size + 1) mkPerBlock
+  for b in [0:nBlocks] do
+    let blockN := blocks[b]!.size
+    let bSize := upperTriCount blockN
+    for v in [0:bSize] do
+      let globalIdx := offsets[b]! + v
+      let c := param.constant[globalIdx]!
+      if c ≠ 0 then
+        let pb := mats[0]!
+        let updated := pb.set! b ((pb[b]!).set! v c)
+        mats := mats.set! 0 updated
+      let cs := param.coeffs[globalIdx]!
+      for k in [0:param.freeCols.size] do
+        let a := cs[k]!
+        if a ≠ 0 then
+          let pb := mats[k + 1]!
+          let updated := pb.set! b ((pb[b]!).set! v a)
+          mats := mats.set! (k + 1) updated
+  return mats
+
+/-- CSDP encoding of the reduced multi-block dual. -/
+private def buildMultiBlockReducedProblem (blocks : Array (BlockSpec n))
+    (mats : Array (Array (Array ℚ))) : CSDP.Problem :=
+  let freeCount := mats.size - 1
+  let nBlocks := blocks.size
+  let aTriples : Array CSDP.ConstraintTriple := Id.run do
+    let mut acc : Array CSDP.ConstraintTriple := #[]
+    for k in [0:freeCount] do
+      let perBlock := mats[k + 1]!
+      for b in [0:nBlocks] do
+        let M := perBlock[b]!
+        let N := blocks[b]!.size
+        for v in [0:M.size] do
+          let c := M[v]!
+          if c ≠ 0 then
+            let (i, j) := upperTriPair N v
+            acc := acc.push
+              { constraint := UInt32.ofNat (k + 1)
+                block := UInt32.ofNat (b + 1)
+                row := UInt32.ofNat (i + 1)
+                col := UInt32.ofNat (j + 1)
+                value := ratToFloat c }
+    return acc
+  let cTriples : Array CSDP.Triple := Id.run do
+    let mut acc : Array CSDP.Triple := #[]
+    let perBlock := mats[0]!
+    for b in [0:nBlocks] do
+      let M := perBlock[b]!
+      let N := blocks[b]!.size
+      for v in [0:M.size] do
+        let c := M[v]!
+        if c ≠ 0 then
+          let (i, j) := upperTriPair N v
+          acc := acc.push
+            { block := UInt32.ofNat (b + 1)
+              row := UInt32.ofNat (i + 1)
+              col := UInt32.ofNat (j + 1)
+              value := ratToFloat (-c) }
+    return acc
+  let b : Array Float := Id.run do
+    let mut out : Array Float := #[]
+    for k in [0:freeCount] do
+      let perBlock := mats[k + 1]!
+      let mut t : ℚ := 0
+      for b in [0:nBlocks] do
+        t := t + upperTriTrace (blocks[b]!.size) (perBlock[b]!)
+      out := out.push (ratToFloat t)
+    return out
+  let blockSizes : Array Int32 :=
+    blocks.map (fun b => Int32.ofNat b.size)
+  { blockSizes := blockSizes, b, c := cTriples, a := aTriples,
+    constantOffset := 0.0 }
+
+/-- Reconstruct per-block rational Gram matrices from a rounded
+reduced vector in the multi-block encoding. Returns `none` on shape
+mismatch. -/
+private def multiBlockReconstructGram (blocks : Array (BlockSpec n))
+    (mats : Array (Array (Array ℚ))) (vec : Array ℚ) :
+    Option (Array (Array ℚ)) := Id.run do
+  if mats.isEmpty ∨ vec.size + 1 ≠ mats.size then return none
+  let nBlocks := blocks.size
+  let mut Qs : Array (Array ℚ) := (mats[0]!).map id
+  for k in [0:vec.size] do
+    let perBlock := mats[k + 1]!
+    for b in [0:nBlocks] do
+      let M := perBlock[b]!
+      let Q := Qs[b]!
+      let mut Q' := Q
+      for v in [0:Q.size] do
+        Q' := Q'.set! v (Q'[v]! + vec[k]! * M[v]!)
+      Qs := Qs.set! b Q'
+  return some Qs
+
+/-- Attempt one denominator in the multi-block reduced encoding: round
+the float dual, reconstruct the per-block Gram, LDL-decompose each block,
+and keep the certificate iff it checks. Returns `none` on any failure
+(reconstruction shape mismatch, non-PSD block, or a failed
+polynomial-identity check). -/
+private def tryReducedSchmudgenDenominator (blocks : Array (BlockSpec n))
+    (mats : Array (Array (Array ℚ))) (raw : FloatArray) (denom : ℚ)
+    (goal : Goal n) (gs : List (CMvPolynomial n ℚ)) (gIdxs : Array (List Nat)) :
+    Option (Certificate n) := Id.run do
+  let mut vec : Array ℚ := #[]
+  for i in [0:raw.size] do
+    vec := vec.push (niceRound denom (raw.get! i))
+  let some Qs := multiBlockReconstructGram blocks mats vec
+    | return none
+  let mut sigmas : List (List Nat × SOSDecomp n) := []
+  for b in [0:blocks.size] do
+    let block := blocks[b]!
+    let Q := Qs[b]!
+    let some terms := LDL.reconstruct block.size Q (basisAsPolys block.basis)
+      | return none
+    sigmas := sigmas.concat (gIdxs[b]!, { terms })
+  let cert : Certificate n := { sigmas, eqCofs := [] }
+  if cert.checks goal gs [] then return some cert
+  return none
+
+private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
+    (gs : List (CMvPolynomial n ℚ)) (goal : Goal n)
+    (useTraceCost : Bool) (extraDeg : Nat) (strategy : BasisStrategy)
+    (maxRoundingDenom : Nat)
+    (maxSubsetCardinality : Nat) :
+    IO (Option (Certificate n)) := do
+  -- Cap on `numVars = Σ_b upperTriCount(blockᵦ.size)` for the reduced
+  -- ℚ Gauss-Jordan in `gramParam`; above this the exact-rational
+  -- elimination gets expensive, so the path bails and the outer loop
+  -- moves on. BBR's reduced problem has `numVars = 237`, well under cap.
+  let maxReducedSchmudgenVars : Nat := 2500
+  if !useTraceCost then return none
+  if gs.isEmpty then return none
+  let blocks := buildBlocks target gs [] extraDeg strategy maxSubsetCardinality
+  if blocks.size < 2 then return none
+  if blocks.any (fun b => b.size = 0) then return none
+  let numVars := totalReducedVars blocks
+  if numVars > maxReducedSchmudgenVars then return none
+  let (eqs, _monos) := multiBlockEquations target blocks
+  let some param := gramParam numVars eqs | return none
+  let mats := multiBlockGramMats blocks param
+  if param.freeCols.isEmpty then
+    let some Qs := multiBlockReconstructGram blocks mats #[] | return none
+    let mut sigmas : List (List Nat × SOSDecomp n) := []
+    for b in [0:blocks.size] do
+      let block := blocks[b]!
+      let Q := Qs[b]!
+      let some terms := LDL.reconstruct block.size Q (basisAsPolys block.basis)
+        | return none
+      sigmas := sigmas.concat (block.idxs, { terms })
+    let cert : Certificate n := { sigmas, eqCofs := [] }
+    if cert.checks goal gs [] then return some cert else return none
+  -- Harrison's `scale_then` (`sos.ml:634-650`): uniform power-of-two
+  -- scaling so the max |entry| across ALL mats lands near `2^20`.
+  -- Uniform scaling preserves the feasible set and the argmin, so the
+  -- recovered y* is the original problem's solution unchanged.
+  let maxEntry : ℚ := Id.run do
+    let mut m : ℚ := 1
+    for k in [0:mats.size] do
+      for b in [0:blocks.size] do
+        let M := (mats[k]!)[b]!
+        for v in [0:M.size] do
+          let entry : ℚ := M[v]!
+          let a : ℚ := if entry < 0 then -entry else entry
+          if a > m then m := a
+    return m
+  let twoTo20Q : ℚ := 1048576
+  let scaleQ : ℚ := if maxEntry > twoTo20Q then twoTo20Q / maxEntry else 1
+  let matsScaled : Array (Array (Array ℚ)) :=
+    mats.map (fun perBlock => perBlock.map (fun M => M.map (· * scaleQ)))
+  let problem := buildMultiBlockReducedProblem blocks matsScaled
+  -- Scale the objective vector so its max |entry| lands near `2^20`.
+  -- Pure cost scaling doesn't change the argmin but improves CSDP's
+  -- interior-point conditioning when trace coefficients span many
+  -- orders of magnitude (Harrison's `scale_then`, `sos.ml:634-650`).
+  let objMax : Float :=
+    problem.b.foldl (fun acc x => if x.abs > acc then x.abs else acc) 1.0
+  let twoTo20 : Float := 1048576.0
+  let objScale : Float := if objMax > twoTo20 then twoTo20 / objMax else 1.0
+  let problem : CSDP.Problem :=
+    { problem with b := problem.b.map (· * objScale) }
+  let sol := CSDP.solve problem
+  if sol.ret ∉ [0, 3] then return none
+  -- The matrix scaling above is uniform (a single power-of-two `scaleQ`
+  -- on every entry), which preserves the feasible set and the argmin, so
+  -- the dual `sol.y` is already the original problem's solution — no
+  -- inverse scaling on `y` is needed.
+  let targetDenom : ℚ := (polyDenom target : ℚ)
+  let constraintDenoms : List ℚ := gs.map fun g => (polyDenom g : ℚ)
+  let crossDenoms : List ℚ := gs.map fun g => (polyDenom (target * g) : ℚ)
+  let denomCandidates : List ℚ :=
+    targetDenom :: constraintDenoms ++ crossDenoms ++ niceDenominators
+  let maxDenomQ : ℚ := (maxRoundingDenom : ℚ)
+  let gIdxs : Array (List Nat) := blocks.map (fun b => b.idxs)
+  for d in denomCandidates do
+    if d ≤ maxDenomQ then
+      if let some cert := tryReducedSchmudgenDenominator blocks mats sol.y d goal gs gIdxs then
+        return some cert
+  return none
+
+
 /-- Constant SOS multiplier from a non-negative rational, represented
 as a single weighted-square term `r · 1²`. -/
 private def constTermDecomp? (r : ℚ) : Option (SOSDecomp n) :=
@@ -1314,7 +1608,7 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
   -- Cost-matrix strategies, in order. Trace maximisation gives CSDP
   -- a well-defined central path on rank-deficient SDPs (Harrison's
@@ -1344,6 +1638,15 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
   let dropConstant := target.coeff (zeroMono n) = 0
   let symmetries := SOS.Symmetry.detectSymmetries target gs ps
   let useReducedPure := gs.isEmpty ∧ ps.isEmpty ∧ symmetries.size > 1
+  -- The closed strict-refutation (`refutation = true`, set only by
+  -- `runClosedRefutation`) routes to the multi-block reduced Schmüdgen
+  -- encoder: it eliminates the polynomial-identity equations over ℚ
+  -- before CSDP, so CSDP sees a pure-PSD problem with no equality
+  -- constraints — far better conditioned than dense `tryOneSdp` at the
+  -- large coefficient scale of a refutation like BBR Lemma 7.2 (where
+  -- `tryOneSdp` returns primal-infeasible). This is the *only* path that
+  -- uses the reduced encoder; every other goal stays on `tryOneSdp`, so
+  -- there is no dense fallback to pay for on non-refutation goals.
   if gs.isEmpty ∧ ps.isEmpty ∧ !useReducedPure then
     match goal with
     | .closed _ =>
@@ -1394,6 +1697,12 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
             if let some cert ← tryReducedPureSdp target goal useTraceCost extraDeg
                 strat maxRoundingDenom symmetries then
               return some cert
+          else if refutation then
+            -- Refutation only: multi-block reduced Schmüdgen encoder, no
+            -- dense fallback (`tryOneSdp` is primal-infeasible at scale).
+            if let some cert ← tryReducedSchmudgenSdp target gs goal useTraceCost
+                extraDeg strat maxRoundingDenom maxCard then
+              return some cert
           else
             if let some cert ← tryOneSdp target gs ps goal useTraceCost extraDeg
                 strat maxRoundingDenom maxCard then
@@ -1408,20 +1717,21 @@ def runFeasibilitySearch (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
   if let some (elimGoal, gs', ps', map) :=
       SOS.EqElim.eliminateEqualities goal gs ps then
     if ps'.length < ps.length then
       match (← runFeasibilitySearchCore elimGoal.target gs' ps' elimGoal
-          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality) with
+          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+          refutation) with
       | some cert =>
           let cert := SOS.EqElim.reconstructCertificate map cert
           if cert.checks goal gs ps then
             return some cert
       | none => pure ()
   runFeasibilitySearchCore target gs ps goal maxRoundingDenom maxDepth
-    basisStrategy maxSubsetCardinality
+    basisStrategy maxSubsetCardinality refutation
 
 /-! ### Strict positivity via LP-slack maximisation
 
@@ -1701,6 +2011,49 @@ def runStrictProduct (p : CMvPolynomial n ℚ)
     | some cert => return some { cert, strictGs, exponent := i }
     | none => pure ()
   return none
+
+/-- Closed non-negativity via the i=0 strict-refutation Positivstellensatz.
+
+To prove `0 ≤ p` (in fact `0 < p`) against `gs`/`ps`, search for a closed
+certificate of the constant `−1` against the augmented inequality list
+`gs ++ [−p]`: i.e. `−1 = σ₀ + Σ σᵢ·gsᵢ + σ·(−p)` with all `σ` SOS. Under
+the contrapositive `p ≤ 0` the augmented constraint `−p ≥ 0` holds, so the
+RHS is `≥ 0`, contradicting `= −1`. Hence `p > 0`.
+
+This is Harrison's actual BBR mechanism: the `i = 0` branch of his
+`REAL_NONLINEAR_PROVER` `tryall` loop (target `−pol⁰ = −1`), NOT an
+`i = 1` Artin form `p = σ₀ + σ₁·(−p)`. The `−1` target yields a far
+better-conditioned reduced SDP — the particular solution puts a single
+`−1` on the `σ₁` constant entry (`σ₁·(−p)` then supplies the `−1` identity
+directly), which rounds cleanly where a `p` target does not. The search
+routes through the multi-block reduced Schmüdgen encoder
+(`tryReducedSchmudgenSdp`), selected by the `refutation := true` flag
+that this function passes to `runFeasibilitySearch` — the only caller
+that does so, so no other goal pays for the reduced encoder.
+
+Soundness is `sos_strict_product_sound` with `strictGs = []`, `exponent = 1`
+(`−(strictProductPoly [])¹ = −1`); the empty `strictGs` makes its
+strict-positivity hypothesis vacuous, so it yields `0 < aeval φ p`
+unconditionally (given `gs ≥ 0`, `ps = 0`). -/
+def runClosedRefutation (p : CMvPolynomial n ℚ)
+    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (basisStrategy : BasisStrategy := .newton)
+    (maxSubsetCardinality : Nat := 1) :
+    IO (Option (Certificate n)) := do
+  -- The reduced refutation encoder does not thread equality cofactors:
+  -- `tryReducedSchmudgenSdp` has no `ps` parameter and checks its
+  -- certificate against `[]`. Rather than silently return a certificate
+  -- that cannot check against a nonempty `ps`, reject that case up front.
+  if !ps.isEmpty then return none
+  let augGs := gs ++ [-p]
+  -- Target `−(strictProductPoly [])^1 = −(1)^1 = −1`, written in the exact
+  -- form `sos_strict_product_sound` expects for `strictGs = []`, `exp = 1`.
+  let target : CMvPolynomial n ℚ := -(strictProductPoly [] ^ 1)
+  let goal : Goal n := .closed target
+  runFeasibilitySearch target augGs ps goal maxRoundingDenom
+    (maxDepth := maxDepth) (basisStrategy := basisStrategy)
+    (maxSubsetCardinality := maxSubsetCardinality) (refutation := true)
 
 /-- Closed/infeasibility search dispatcher. Owns the `Goal → target`
 translation (`p` for `.closed`, `-1` for `.infeasible`). Strict

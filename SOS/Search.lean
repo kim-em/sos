@@ -632,37 +632,21 @@ def buildSdp (target : CMvPolynomial n ℚ) (gs : List (CMvPolynomial n ℚ))
 
 /-! ### Denominator schedule for rational rounding -/
 
-/-- Schedule of denominators tried by the rational rounder, adapted from
-`sos.ml`'s `find_rounding`. First a dense small-integer region
-(`[1..63]`), then powers of two interleaved with their 1.5× scalings
-(`64, 96, 128, 192, 256, 384, …, 2^66`).
+/-- Schedule of denominators tried by the rational rounder, exactly
+Harrison's `sos.ml` `find_rounding`: `map num (1--31) @ map pow2 (5--66)`,
+i.e. the integers `[1..31]` followed by the pure powers of two
+`2^5, 2^6, …, 2^66` (`sos.ml:1085-1086`, `sos.ml:1564-1565`).
 
-Harrison reports that "small ints first, then doubling" works
-empirically better than a strict doubling schedule — the densified
-small region and 1.5× interleaves catch Gram denominators that the
-plain `[1..31] ++ [2^5..2^66]` schedule he uses in HOL Light would
-miss.
-
-The upper end matches Harrison's HOL Light schedule at `2^66`.
 `SOS.Search.niceRound` (and the exact-rational path it falls back to
 above `2^48`) handles candidates at this scale without saturation
-(PR #71). The `maxRoundingDenom` field of `SOS.Config` (see
+(PR #71). The `maxRoundingDenomLog2` field of `SOS.Config` (see
 `SOS/Tactic.lean`) filters the candidate list — schedule entries,
-`polyDenom target`, constraint denoms, and cross denoms — against a
-caller-set cap (default `2^24`). Users targeting BBR-style
-boundary-tight Grams should opt into the wider range explicitly via
-`sos (config := { maxRoundingDenom := 1 <<< 66 })`. -/
+`polyDenom target`, constraint denoms, and cross denoms — against the
+cap `2 ^ maxRoundingDenomLog2` (default exponent `66`, i.e. `2^66`,
+matching Harrison). -/
 def niceDenominators : List ℚ :=
-  let smalls : List ℚ := (List.range 63).map (fun i => (i + 1 : ℚ))
-  -- For k = 6..65, alternate `2^k` and `3·2^(k-1) = 1.5·2^k`; then
-  -- `2^66`. The extended range past `2^24` (the previous cap) lines
-  -- up with Harrison's HOL Light schedule, giving rounding more room
-  -- for targets whose float Gram lands far from a small-denom
-  -- rational point.
-  let bigs : List ℚ :=
-    (List.range 60).flatMap
-        (fun i => [(2 ^ (i + 6) : ℚ), ((3 : ℚ) * 2 ^ (i + 5))])
-      ++ [(2 ^ 66 : ℚ)]
+  let smalls : List ℚ := (List.range 31).map (fun i => (i + 1 : ℚ))
+  let bigs : List ℚ := (List.range 62).map (fun i => (2 ^ (i + 5) : ℚ))
   smalls ++ bigs
 
 /-- Exact rational value of a finite, non-NaN `Float`. Decomposes `x`
@@ -1143,7 +1127,7 @@ eliminate coefficient and Gram-symmetry equalities over `ℚ`, solve CSDP
 in the free orbit parameters, and round that small vector. -/
 private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
     (useTraceCost : Bool) (extraDeg : Nat) (_strategy : BasisStrategy)
-    (maxRoundingDenom : Nat) (symmetries : Array (Array Nat)) :
+    (maxRoundingDenomLog2 : Nat) (symmetries : Array (Array Nat)) :
     IO (Option (Certificate n)) := do
   if !useTraceCost then
     return none
@@ -1177,7 +1161,7 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
     return none
   let targetDenom : ℚ := (polyDenom target : ℚ)
   let denomCandidates : List ℚ := targetDenom :: niceDenominators
-  let maxDenomQ : ℚ := (maxRoundingDenom : ℚ)
+  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
       if let some cert := tryReducedDenominator block mats sol.y d goal then
@@ -1400,7 +1384,7 @@ private def tryReducedSchmudgenDenominator (blocks : Array (BlockSpec n))
 private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (goal : Goal n)
     (useTraceCost : Bool) (extraDeg : Nat) (strategy : BasisStrategy)
-    (maxRoundingDenom : Nat)
+    (maxRoundingDenomLog2 : Nat)
     (maxSubsetCardinality : Nat) :
     IO (Option (Certificate n)) := do
   -- Cap on `numVars = Σ_b upperTriCount(blockᵦ.size)` for the reduced
@@ -1469,7 +1453,7 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
   let crossDenoms : List ℚ := gs.map fun g => (polyDenom (target * g) : ℚ)
   let denomCandidates : List ℚ :=
     targetDenom :: constraintDenoms ++ crossDenoms ++ niceDenominators
-  let maxDenomQ : ℚ := (maxRoundingDenom : ℚ)
+  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
   let gIdxs : Array (List Nat) := blocks.map (fun b => b.idxs)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
@@ -1528,15 +1512,15 @@ private def tryConstantProductCertificate (target : CMvPolynomial n ℚ)
 
 /-- Try a single SDP encoding (one choice of `useTraceCost` and one
 `extraDeg` relaxation level) and the denominator schedule. Candidates
-are filtered against `maxRoundingDenom` (default `2^20`); raise it via
-the tactic-surface `Config.maxRoundingDenom` field for targets whose
-Gram needs a larger denom. Returns `none` if CSDP fails or no rounding
-validates. -/
+are filtered against the cap `2 ^ maxRoundingDenomLog2` (default
+exponent `66`); lower the tactic-surface `Config.maxRoundingDenomLog2`
+field to fail faster on targets you know won't round cleanly. Returns
+`none` if CSDP fails or no rounding validates. -/
 private def tryOneSdp (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (useTraceCost : Bool) (extraDeg : Nat)
     (strategy : BasisStrategy := .dense)
-    (maxRoundingDenom : Nat := 1048576)
+    (maxRoundingDenomLog2 : Nat := 66)
     (maxSubsetCardinality : Nat := 1) : IO (Option (Certificate n)) := do
   let (problem, blocks, eqSpecs, _monos, _) :=
     buildSdp target gs (.feasibility useTraceCost) ps extraDeg strategy
@@ -1570,7 +1554,7 @@ private def tryOneSdp (target : CMvPolynomial n ℚ)
   let denomCandidates : List ℚ :=
     targetDenom :: constraintDenoms ++ crossDenoms ++ equalityDenoms
       ++ niceDenominators
-  let maxDenomQ : ℚ := (maxRoundingDenom : ℚ)
+  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
       if let some cert := tryDenominator gs ps blocks eqSpecs sol d goal then
@@ -1585,9 +1569,9 @@ That avoids the general search's trace-cost attempt and multiplier/product
 setup while still using the configured σ₀ basis strategy. -/
 private def tryDirectSos (target : CMvPolynomial n ℚ)
     (goal : Goal n) (basisStrategy : BasisStrategy := .newton)
-    (maxRoundingDenom : Nat := 1048576) : IO (Option (Certificate n)) :=
+    (maxRoundingDenomLog2 : Nat := 66) : IO (Option (Certificate n)) :=
   tryOneSdp target [] [] goal (useTraceCost := false) (extraDeg := 0)
-    basisStrategy maxRoundingDenom (maxSubsetCardinality := 1)
+    basisStrategy maxRoundingDenomLog2 (maxSubsetCardinality := 1)
 
 /-- Closed-positivity / infeasibility search: produce a Certificate
 proving `target = σ₀ + Σᵢ σᵢ · gᵢ + Σⱼ qⱼ · pⱼ` for the chosen `target`.
@@ -1602,11 +1586,12 @@ and the SDP grows combinatorially with the basis, so the failure path
 is `(maxDepth+1) × strategies` CSDP solves. Opt in per call via
 `sos (config := { maxDepth := k })`.
 
-`maxRoundingDenom` caps the denominator schedule (default `2^20`).
-Same config struct on the tactic side. -/
+`maxRoundingDenomLog2` caps the denominator schedule at
+`2 ^ maxRoundingDenomLog2` (default exponent `66`). Same config struct
+on the tactic side. -/
 private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
-    (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
+    (goal : Goal n) (maxRoundingDenomLog2 : Nat := 66)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
@@ -1650,7 +1635,7 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
   if gs.isEmpty ∧ ps.isEmpty ∧ !useReducedPure then
     match goal with
     | .closed _ =>
-      if let some cert ← tryDirectSos target goal basisStrategy maxRoundingDenom then
+      if let some cert ← tryDirectSos target goal basisStrategy maxRoundingDenomLog2 then
         return some cert
     | _ => pure ()
   let pruneAllowed : Bool := match goal with
@@ -1695,17 +1680,17 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
         for useTraceCost in costStrategies do
           if useReducedPure then
             if let some cert ← tryReducedPureSdp target goal useTraceCost extraDeg
-                strat maxRoundingDenom symmetries then
+                strat maxRoundingDenomLog2 symmetries then
               return some cert
           else if refutation then
             -- Refutation only: multi-block reduced Schmüdgen encoder, no
             -- dense fallback (`tryOneSdp` is primal-infeasible at scale).
             if let some cert ← tryReducedSchmudgenSdp target gs goal useTraceCost
-                extraDeg strat maxRoundingDenom maxCard then
+                extraDeg strat maxRoundingDenomLog2 maxCard then
               return some cert
           else
             if let some cert ← tryOneSdp target gs ps goal useTraceCost extraDeg
-                strat maxRoundingDenom maxCard then
+                strat maxRoundingDenomLog2 maxCard then
               return some cert
   return none
 
@@ -1715,7 +1700,7 @@ substituted system and the resulting certificate is lifted back over the
 original equality list before returning. -/
 def runFeasibilitySearch (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
-    (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
+    (goal : Goal n) (maxRoundingDenomLog2 : Nat := 66)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
@@ -1723,14 +1708,14 @@ def runFeasibilitySearch (target : CMvPolynomial n ℚ)
       SOS.EqElim.eliminateEqualities goal gs ps then
     if ps'.length < ps.length then
       match (← runFeasibilitySearchCore elimGoal.target gs' ps' elimGoal
-          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+          maxRoundingDenomLog2 maxDepth basisStrategy maxSubsetCardinality
           refutation) with
       | some cert =>
           let cert := SOS.EqElim.reconstructCertificate map cert
           if cert.checks goal gs ps then
             return some cert
       | none => pure ()
-  runFeasibilitySearchCore target gs ps goal maxRoundingDenom maxDepth
+  runFeasibilitySearchCore target gs ps goal maxRoundingDenomLog2 maxDepth
     basisStrategy maxSubsetCardinality refutation
 
 /-! ### Strict positivity via LP-slack maximisation
@@ -1793,7 +1778,7 @@ as an equality LP over `ℚ`. This covers linear strict-strict cases
 without entering CSDP. -/
 private def tryAffineStrict (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
-    (maxRoundingDenom : Nat) : Option (StrictResult n) := Id.run do
+    (maxRoundingDenomLog2 : Nat) : Option (StrictResult n) := Id.run do
   if !ps.isEmpty then return none
   let some (pCoeffs, pConst) := affineCoeffs? p | return none
   let mut gData : Array (Array ℚ × ℚ) := Array.mkEmpty gs.length
@@ -1808,7 +1793,7 @@ private def tryAffineStrict (p : CMvPolynomial n ℚ)
   -- smaller.
   for k in [4:21] do
     let denom : Nat := 2 ^ k
-    if maxRoundingDenom < denom then continue
+    if maxRoundingDenomLog2 < k then continue
     let ε : ℚ := 1 / (denom : ℚ)
     if hε : 0 < ε then
       let nVars := gs.length + 1
@@ -1853,11 +1838,11 @@ Returns `none` if CSDP fails, `λ* ≤ 1e-9`, or no candidate ε in the
 window admits a verifiable certificate. -/
 private def runStrictCore (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
-    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (StrictResult n)) := do
-  if let some cert := tryAffineStrict p gs ps maxRoundingDenom then
+  if let some cert := tryAffineStrict p gs ps maxRoundingDenomLog2 then
     return some cert
   -- Iteratively deepen alongside `runFeasibilitySearch`: each outer
   -- pass re-runs the LP-slack solve at the higher relaxation. Each
@@ -1910,7 +1895,7 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
       if hε : 0 < ε then
         let goal : Goal n := .strict p ε hε
         let targetPoly := p - CMvPolynomial.C ε
-        match (← runFeasibilitySearch targetPoly gs ps goal maxRoundingDenom
+        match (← runFeasibilitySearch targetPoly gs ps goal maxRoundingDenomLog2
             (maxDepth := extraDeg) (basisStrategy := basisStrategy)
             (maxSubsetCardinality := maxSubsetCardinality)) with
         | some cert => return some { cert, ε, hε }
@@ -1921,14 +1906,14 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
 probe and the final feasibility reconstruction. -/
 def runStrict (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
-    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (StrictResult n)) := do
   if let some (elimGoal, gs', ps', map) :=
       SOS.EqElim.eliminateEqualities (.closed p) gs ps then
     if ps'.length < ps.length then
-      match (← runStrictCore elimGoal.target gs' ps' maxRoundingDenom maxDepth
+      match (← runStrictCore elimGoal.target gs' ps' maxRoundingDenomLog2 maxDepth
           basisStrategy maxSubsetCardinality) with
       | some res =>
           let cert := SOS.EqElim.reconstructCertificate map res.cert
@@ -1936,7 +1921,7 @@ def runStrict (p : CMvPolynomial n ℚ)
           if cert.checks goal gs ps then
             return some { res with cert := cert }
       | none => pure ()
-  runStrictCore p gs ps maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+  runStrictCore p gs ps maxRoundingDenomLog2 maxDepth basisStrategy maxSubsetCardinality
 
 /-! ### Strict positivity via strict-product Positivstellensatz
 
@@ -1977,7 +1962,7 @@ produces a verifiable closed cert. -/
 def runStrictProduct (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ))
     (strictIdxs : List Nat) (ps : List (CMvPolynomial n ℚ) := [])
-    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (StrictProductResult n)) := do
@@ -2005,7 +1990,7 @@ def runStrictProduct (p : CMvPolynomial n ℚ)
   for i in [1:iMax + 1] do
     let target := -(pol ^ i)
     let goal : Goal n := .closed target
-    match (← runFeasibilitySearch target augGs ps goal maxRoundingDenom
+    match (← runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
         (maxDepth := maxDepth) (basisStrategy := basisStrategy)
         (maxSubsetCardinality := maxSubsetCardinality)) with
     | some cert => return some { cert, strictGs, exponent := i }
@@ -2037,7 +2022,7 @@ strict-positivity hypothesis vacuous, so it yields `0 < aeval φ p`
 unconditionally (given `gs ≥ 0`, `ps = 0`). -/
 def runClosedRefutation (p : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
-    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (Certificate n)) := do
@@ -2051,7 +2036,7 @@ def runClosedRefutation (p : CMvPolynomial n ℚ)
   -- form `sos_strict_product_sound` expects for `strictGs = []`, `exp = 1`.
   let target : CMvPolynomial n ℚ := -(strictProductPoly [] ^ 1)
   let goal : Goal n := .closed target
-  runFeasibilitySearch target augGs ps goal maxRoundingDenom
+  runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
     (maxDepth := maxDepth) (basisStrategy := basisStrategy)
     (maxSubsetCardinality := maxSubsetCardinality) (refutation := true)
 
@@ -2062,16 +2047,16 @@ here is a defensive `none` for direct callers (the tactic surface
 routes `.strict` goals straight to `runStrict`). -/
 def runSearch (goal : Goal n) (gs : List (CMvPolynomial n ℚ))
     (ps : List (CMvPolynomial n ℚ) := [])
-    (maxRoundingDenom : Nat := 1048576) (maxDepth : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (Certificate n)) := do
   match goal with
   | .closed p   =>
-    runFeasibilitySearch p gs ps goal maxRoundingDenom maxDepth basisStrategy
+    runFeasibilitySearch p gs ps goal maxRoundingDenomLog2 maxDepth basisStrategy
       maxSubsetCardinality
   | .infeasible =>
-    runFeasibilitySearch (-1) gs ps goal maxRoundingDenom maxDepth basisStrategy
+    runFeasibilitySearch (-1) gs ps goal maxRoundingDenomLog2 maxDepth basisStrategy
       maxSubsetCardinality
   | .strict ..  => return none
 

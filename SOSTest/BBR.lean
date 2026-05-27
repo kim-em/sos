@@ -32,8 +32,10 @@ close BBR at any depth/denominator we expose.
 
 The proof is fully kernel-checked — `#print axioms` shows only
 `propext`, `Classical.choice`, `Quot.sound` (no `native_decide`). The
-wider denominator schedule is needed (`maxRoundingDenom := 1 <<< 66`,
-PR #77) because the certificate's Gram pivots have large denominators. -/
+certificate's Gram pivots have large denominators, so it needs the
+upper end of the rounding schedule — which is just Harrison's
+`find_rounding` ceiling of `2^66`, the default, so plain `by sos`
+closes it with no config. -/
 
 set_option maxHeartbeats 4000000 in
 example : ∀ x y : ℝ,
@@ -52,4 +54,4 @@ example : ∀ x y : ℝ,
       + 359512561893 * x ^ 4 * y ^ 4 - 10586722304 * x ^ 5
       - 152799075816 * x ^ 6 + 1371693928 * x ^ 7
       + 41813434533 * x ^ 8 := by
-  sos (config := { maxRoundingDenom := 1 <<< 66 })
+  sos

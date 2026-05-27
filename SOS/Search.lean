@@ -1616,7 +1616,7 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
   -- Cost-matrix strategies, in order. Trace maximisation gives CSDP
   -- a well-defined central path on rank-deficient SDPs (Harrison's
@@ -1646,15 +1646,15 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
   let dropConstant := target.coeff (zeroMono n) = 0
   let symmetries := SOS.Symmetry.detectSymmetries target gs ps
   let useReducedPure := gs.isEmpty ∧ ps.isEmpty ∧ symmetries.size > 1
-  -- Closed constrained goals (gs non-empty, ps empty) try the multi-block
-  -- reduced Schmüdgen encoder first: it eliminates the polynomial-identity
-  -- equations over ℚ before CSDP, so CSDP sees a pure-PSD problem with no
-  -- equality constraints — far better conditioned than dense `tryOneSdp`
-  -- at large coefficient scale. Falls back to `tryOneSdp` on failure. This
-  -- is the path the closed strict-refutation (`runClosedRefutation`) uses
-  -- to close BBR Lemma 7.2.
-  let isClosedGoal : Bool := match goal with | .closed _ => true | _ => false
-  let useReducedSchmudgen := !gs.isEmpty ∧ ps.isEmpty ∧ isClosedGoal
+  -- The closed strict-refutation (`refutation = true`, set only by
+  -- `runClosedRefutation`) routes to the multi-block reduced Schmüdgen
+  -- encoder: it eliminates the polynomial-identity equations over ℚ
+  -- before CSDP, so CSDP sees a pure-PSD problem with no equality
+  -- constraints — far better conditioned than dense `tryOneSdp` at the
+  -- large coefficient scale of a refutation like BBR Lemma 7.2 (where
+  -- `tryOneSdp` returns primal-infeasible). This is the *only* path that
+  -- uses the reduced encoder; every other goal stays on `tryOneSdp`, so
+  -- there is no dense fallback to pay for on non-refutation goals.
   if gs.isEmpty ∧ ps.isEmpty ∧ !useReducedPure then
     match goal with
     | .closed _ =>
@@ -1705,13 +1705,11 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
             if let some cert ← tryReducedPureSdp target goal useTraceCost extraDeg
                 strat maxRoundingDenom symmetries then
               return some cert
-          else if useReducedSchmudgen then
-            -- Multi-block reduced Schmüdgen first; dense fallback.
+          else if refutation then
+            -- Refutation only: multi-block reduced Schmüdgen encoder, no
+            -- dense fallback (`tryOneSdp` is primal-infeasible at scale).
             if let some cert ← tryReducedSchmudgenSdp target gs goal useTraceCost
                 extraDeg strat maxRoundingDenom maxCard then
-              return some cert
-            if let some cert ← tryOneSdp target gs ps goal useTraceCost extraDeg
-                strat maxRoundingDenom maxCard then
               return some cert
           else
             if let some cert ← tryOneSdp target gs ps goal useTraceCost extraDeg
@@ -1727,20 +1725,21 @@ def runFeasibilitySearch (target : CMvPolynomial n ℚ)
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
     (goal : Goal n) (maxRoundingDenom : Nat := 1048576)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
-    (maxSubsetCardinality : Nat := 1) :
+    (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
     IO (Option (Certificate n)) := do
   if let some (elimGoal, gs', ps', map) :=
       SOS.EqElim.eliminateEqualities goal gs ps then
     if ps'.length < ps.length then
       match (← runFeasibilitySearchCore elimGoal.target gs' ps' elimGoal
-          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality) with
+          maxRoundingDenom maxDepth basisStrategy maxSubsetCardinality
+          refutation) with
       | some cert =>
           let cert := SOS.EqElim.reconstructCertificate map cert
           if cert.checks goal gs ps then
             return some cert
       | none => pure ()
   runFeasibilitySearchCore target gs ps goal maxRoundingDenom maxDepth
-    basisStrategy maxSubsetCardinality
+    basisStrategy maxSubsetCardinality refutation
 
 /-! ### Strict positivity via LP-slack maximisation
 
@@ -2036,8 +2035,9 @@ better-conditioned reduced SDP — the particular solution puts a single
 `−1` on the `σ₁` constant entry (`σ₁·(−p)` then supplies the `−1` identity
 directly), which rounds cleanly where a `p` target does not. The search
 routes through the multi-block reduced Schmüdgen encoder
-(`tryReducedSchmudgenSdp`, via the `useReducedSchmudgen` dispatch gate),
-since `gs ++ [−p]` is non-empty.
+(`tryReducedSchmudgenSdp`), selected by the `refutation := true` flag
+that this function passes to `runFeasibilitySearch` — the only caller
+that does so, so no other goal pays for the reduced encoder.
 
 Soundness is `sos_strict_product_sound` with `strictGs = []`, `exponent = 1`
 (`−(strictProductPoly [])¹ = −1`); the empty `strictGs` makes its
@@ -2056,7 +2056,7 @@ def runClosedRefutation (p : CMvPolynomial n ℚ)
   let goal : Goal n := .closed target
   runFeasibilitySearch target augGs ps goal maxRoundingDenom
     (maxDepth := maxDepth) (basisStrategy := basisStrategy)
-    (maxSubsetCardinality := maxSubsetCardinality)
+    (maxSubsetCardinality := maxSubsetCardinality) (refutation := true)
 
 /-- Closed/infeasibility search dispatcher. Owns the `Goal → target`
 translation (`p` for `.closed`, `-1` for `.infeasible`). Strict

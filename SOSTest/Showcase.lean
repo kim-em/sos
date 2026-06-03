@@ -30,6 +30,16 @@ example (x y z : ℝ) :
     0 ≤ (x^2 + y^2 + z^2) *
         (x^4*y^2 + x^2*y^4 + z^6 - 3*x^2*y^2*z^2) := by sos
 
+-- The *bare* Motzkin polynomial, with no multiplier supplied. Being
+-- non-negative but not SOS, it has no direct certificate; `maxRefutationPower`
+-- opts into the Positivstellensatz power refutation (Harrison's
+-- `REAL_NONLINEAR_PROVER`): negate to `0 < -M`, find `-M = σ₀ + σ₁·(-M)`,
+-- and recover the exact rational certificate by facial reduction. Off by
+-- default because each power is a family of growing-degree CSDP solves.
+example (x y : ℝ) :
+    0 ≤ x^4*y^2 + x^2*y^4 + 1 - 3*x^2*y^2 := by
+  sos (config := { maxRefutationPower := 1 })
+
 -- Zeng et al., JSC vol 37 (2004), p83-99 (Harrison `sos.ml:1879`).
 example (x y z : ℝ) :
     0 ≤ x^4*y^4 - 2*x^5*y^3*z^2 + x^6*y^2*z^4

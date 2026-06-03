@@ -1356,6 +1356,238 @@ private def multiBlockReconstructGram (blocks : Array (BlockSpec n))
       Qs := Qs.set! b Q'
   return some Qs
 
+/-! ### Facial reduction: rank-aware rational recovery
+
+When CSDP returns a reduced-accuracy solution on a rank-deficient
+(boundary) SOS face — the generic situation for genuinely non-SOS
+non-negative polynomials such as Motzkin's — plain denominator rounding of
+the float Gram lands just outside the PSD cone and fails. Facial reduction
+recovers the exact rational certificate instead of relying on the float
+being roundable: estimate the numerical null space of the float Gram,
+rationalise it, impose `Gram·u = 0` as exact *linear* constraints on the
+free Gram parameters (these confine the solution to the face, where it is
+rank-deficient by construction rather than by luck), solve that rational
+system exactly, and check the resulting Gram. This mirrors the
+Peyrl–Parrilo projection idea, adapted to the reduced free-parameter
+encoding where the polynomial identity already holds for *any* rational
+parameter vector — so only PSD-ness, not the identity, needs repair. -/
+
+/-- Expand an upper-triangle-packed `N×N` symmetric matrix to dense rows. -/
+private def expandUpperTri (N : Nat) (packed : Array Float) : Array (Array Float) :=
+  Id.run do
+    let mut M : Array (Array Float) :=
+      (Array.range N).map (fun _ => Array.replicate N (0.0 : Float))
+    for v in [0:packed.size] do
+      let (i, j) := upperTriPair N v
+      let x := packed[v]!
+      M := M.set! i ((M[i]!).set! j x)
+      M := M.set! j ((M[j]!).set! i x)
+    return M
+
+/-- Symmetric eigendecomposition by cyclic Jacobi rotations. Returns
+`(eigenvalues, V)` where eigenvector `k` is column `k` of `V` (i.e.
+`V[i][k]`). `N` is the block size (≤ basis size, ~45), so the
+`O(N³)`-per-sweep cost is irrelevant. -/
+private def jacobiEigen (a0 : Array (Array Float)) :
+    Array Float × Array (Array Float) := Id.run do
+  let n := a0.size
+  let mut a := a0
+  let mut v : Array (Array Float) := Id.run do
+    let mut m : Array (Array Float) := #[]
+    for i in [0:n] do
+      m := m.push ((Array.replicate n (0.0 : Float)).set! i 1.0)
+    return m
+  for _sweep in [0:100] do
+    let mut off : Float := 0.0
+    for p in [0:n] do
+      for q in [p+1:n] do
+        off := off + (a[p]!)[q]! * (a[p]!)[q]!
+    if off ≤ 1e-28 then break
+    for p in [0:n] do
+      for q in [p+1:n] do
+        let apq := (a[p]!)[q]!
+        if apq.abs > 1e-300 then
+          let app := (a[p]!)[p]!
+          let aqq := (a[q]!)[q]!
+          let theta := (aqq - app) / (2.0 * apq)
+          let sgn := if theta ≥ 0.0 then 1.0 else -1.0
+          let t := sgn / (theta.abs + Float.sqrt (theta * theta + 1.0))
+          let c := 1.0 / Float.sqrt (t * t + 1.0)
+          let s := t * c
+          -- A ← A J (rotate columns p, q)
+          for k in [0:n] do
+            let akp := (a[k]!)[p]!
+            let akq := (a[k]!)[q]!
+            a := a.set! k (((a[k]!).set! p (c * akp - s * akq)).set! q (s * akp + c * akq))
+          -- A ← Jᵀ A (rotate rows p, q)
+          for k in [0:n] do
+            let apk := (a[p]!)[k]!
+            let aqk := (a[q]!)[k]!
+            a := a.set! p ((a[p]!).set! k (c * apk - s * aqk))
+            a := a.set! q ((a[q]!).set! k (s * apk + c * aqk))
+          -- V ← V J
+          for k in [0:n] do
+            let vkp := (v[k]!)[p]!
+            let vkq := (v[k]!)[q]!
+            v := v.set! k (((v[k]!).set! p (c * vkp - s * vkq)).set! q (s * vkp + c * vkq))
+  let mut eigs : Array Float := #[]
+  for i in [0:n] do
+    eigs := eigs.push ((a[i]!)[i]!)
+  return (eigs, v)
+
+/-- Rationalise a float vector: divide by its largest-magnitude entry (so
+the dominant entry becomes ±1), then round each entry to the grid `1/d`.
+Returns the cleared rational vector. -/
+private def rationaliseVec (denom : ℚ) (u : Array Float) : Array ℚ := Id.run do
+  let mut mx : Float := 0.0
+  for x in u do
+    if x.abs > mx then mx := x.abs
+  if mx ≤ 1e-300 then return u.map (fun _ => (0 : ℚ))
+  let mut out : Array ℚ := #[]
+  for x in u do
+    out := out.push (niceRound denom (x / mx))
+  return out
+
+/-- Apply a dense symmetric `N×N` rational matrix (from upper-tri packing)
+to a rational vector `u`, returning `M·u`. -/
+private def upperTriApply (N : Nat) (packed : Array ℚ) (u : Array ℚ) : Array ℚ :=
+  Id.run do
+    let mut out : Array ℚ := Array.replicate N 0
+    for v in [0:packed.size] do
+      let (i, j) := upperTriPair N v
+      let x := packed[v]!
+      out := out.set! i (out[i]! + x * u[j]!)
+      if i ≠ j then
+        out := out.set! j (out[j]! + x * u[i]!)
+    return out
+
+/-- Facial-reduction recovery. From the float reduced solution `rawY`,
+estimate each block's numerical null space, rationalise it, impose
+`Gram_b(y)·u = 0` as exact rational linear constraints on the free vector
+`y`, solve, and check the resulting certificate. The null-space tolerance
+selects eigenvalues below `relTol · maxᵢ|λᵢ|`. Returns `none` if no rational
+null space is found or the recovered Gram fails to check. -/
+private def tryFacialRecovery (blocks : Array (BlockSpec n))
+    (mats : Array (Array (Array ℚ))) (rawY : FloatArray)
+    (goal : Goal n) (gs : List (CMvPolynomial n ℚ)) (gIdxs : Array (List Nat)) :
+    Option (Certificate n) := Id.run do
+  let m := mats.size - 1            -- number of free variables
+  if rawY.size ≠ m then return none
+  -- Float Gram per block from the (unrounded) float solution.
+  let floatGramPacked : Array (Array Float) := Id.run do
+    let mut out : Array (Array Float) := #[]
+    for b in [0:blocks.size] do
+      let M0 := (mats[0]!)[b]!
+      let sz := M0.size
+      let mut packed : Array Float := Array.replicate sz 0.0
+      for v in [0:sz] do
+        let mut acc : Float := ratToFloat (M0[v]!)
+        for k in [0:m] do
+          let Mk := (mats[k+1]!)[b]!
+          acc := acc + rawY.get! k * ratToFloat (Mk[v]!)
+        packed := packed.set! v acc
+      out := out.push packed
+    return out
+  -- Per-block float null-space *projectors* `P = Σ_{null k} vₖ vₖᵀ`. The
+  -- projector is basis-independent — unlike the arbitrary orthonormal
+  -- eigenvectors a single Jacobi sweep returns — so it is far more often
+  -- rationally recoverable (the Euclidean projector onto a *rational*
+  -- subspace is itself rational, though its denominators can be large and
+  -- the float projector is only a good approximation when the rank cut is
+  -- right). Its columns are the candidate rational null directions.
+  let projectors : Array (Array (Array Float)) := Id.run do
+    let mut out : Array (Array (Array Float)) := #[]
+    for b in [0:blocks.size] do
+      let N := blocks[b]!.size
+      let (eigs, V) := jacobiEigen (expandUpperTri N (floatGramPacked[b]!))
+      let mut maxAbs : Float := 0.0
+      for e in eigs do
+        if e.abs > maxAbs then maxAbs := e.abs
+      let tol := maxAbs * 1e-4 + 1e-12
+      let mut P : Array (Array Float) :=
+        (Array.range N).map (fun _ => Array.replicate N (0.0 : Float))
+      for k in [0:N] do
+        if (eigs[k]!).abs < tol then
+          for i in [0:N] do
+            let vik := (V[i]!)[k]!
+            let Pi := P[i]!
+            let mut Pi' := Pi
+            for j in [0:N] do
+              Pi' := Pi'.set! j (Pi'[j]! + vik * (V[j]!)[k]!)
+            P := P.set! i Pi'
+      out := out.push P
+    return out
+  -- Try a ladder of rationalisation denominators for the projector columns.
+  for denom in ([1, 2, 3, 4, 6, 8, 12, 16, 24, 48] : List ℚ) do
+    let mut rows : Array (Array ℚ) := #[]
+    let mut anyNull := false
+    for b in [0:blocks.size] do
+      let N := blocks[b]!.size
+      let P := projectors[b]!
+      -- Rationalise each nonzero projector column to a candidate null
+      -- direction, then reduce to an independent rational basis (`rref`):
+      -- imposing every column separately piles on redundant approximate
+      -- constraints, and small inconsistencies between independently-rounded
+      -- columns can render the exact system spuriously infeasible. Each
+      -- candidate is augmented with a zero RHS so `rref` row-reduces the
+      -- homogeneous span.
+      let mut candidates : Array (Array ℚ) := #[]
+      for jcol in [0:N] do
+        let mut col : Array Float := #[]
+        let mut cmax : Float := 0.0
+        for i in [0:N] do
+          let x := (P[i]!)[jcol]!
+          col := col.push x
+          if x.abs > cmax then cmax := x.abs
+        if cmax > 1e-6 then
+          candidates := candidates.push ((rationaliseVec denom col).push 0)
+      for brow in (SOS.RatLinAlg.rref N candidates).rows do
+        let ur := brow.extract 0 N
+        anyNull := true
+        -- `Gram_b(y)·ur = 0` per component `i`, in `eliminateAll`'s
+        -- `Σ_t row[t]·y[t] + row[m] = 0` convention, so the constant
+        -- column carries `(M₀·ur)[i]` un-negated (the `gramParam` caller
+        -- flips sign because its rows use the opposite convention).
+        let m0u := upperTriApply N ((mats[0]!)[b]!) ur
+        let mut cols : Array (Array ℚ) := #[]
+        for t in [0:m] do
+          cols := cols.push (upperTriApply N ((mats[t+1]!)[b]!) ur)
+        for i in [0:N] do
+          let mut row : Array ℚ := Array.replicate (m + 1) 0
+          for t in [0:m] do
+            row := row.set! t ((cols[t]!)[i]!)
+          row := row.set! m (m0u[i]!)
+          rows := rows.push row
+    if anyNull then
+      if let some elim := SOS.RatLinAlg.eliminateAll m rows then
+        -- Seed any *residual* free coordinates from the rounded float
+        -- solution rather than 0: when the facial constraints leave a
+        -- positive-dimensional affine space, the `free = 0` point is an
+        -- arbitrary face vertex that can fail PSD even when a point near
+        -- CSDP's (PSD) interior would pass. Set the free coordinates from
+        -- `rawY`, then back-substitute each assignment
+        -- `y[v] = expr[m] + Σ_free expr[f]·y[f]`.
+        let mut y : Array ℚ := Array.replicate m 0
+        for f in elim.freeCols do
+          y := y.set! f (niceRound denom (rawY.get! f))
+        for (v, expr) in elim.assignments do
+          let mut val := expr[m]!
+          for f in elim.freeCols do
+            val := val + (expr[f]!) * (y[f]!)
+          y := y.set! v val
+        if let some Qs := multiBlockReconstructGram blocks mats y then
+          let mut sigmas : List (List Nat × SOSDecomp n) := []
+          let mut ok := true
+          for b in [0:blocks.size] do
+            let block := blocks[b]!
+            match LDL.reconstruct block.size (Qs[b]!) (basisAsPolys block.basis) with
+            | some terms => sigmas := sigmas.concat (gIdxs[b]!, { terms })
+            | none => ok := false
+          if ok then
+            let cert : Certificate n := { sigmas, eqCofs := [] }
+            if cert.checks goal gs [] then return some cert
+  return none
+
 /-- Attempt one denominator in the multi-block reduced encoding: round
 the float dual, reconstruct the per-block Gram, LDL-decompose each block,
 and keep the certificate iff it checks. Returns `none` on any failure
@@ -1459,6 +1691,11 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
     if d ≤ maxDenomQ then
       if let some cert := tryReducedSchmudgenDenominator blocks mats sol.y d goal gs gIdxs then
         return some cert
+  -- Plain rounding failed: the solution is on a rank-deficient boundary
+  -- face (the generic case for non-SOS non-negative targets). Recover the
+  -- exact rational certificate by facial reduction.
+  if let some cert := tryFacialRecovery blocks mats sol.y goal gs gIdxs then
+    return some cert
   return none
 
 
@@ -2039,6 +2276,47 @@ def runClosedRefutation (p : CMvPolynomial n ℚ)
   runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
     (maxDepth := maxDepth) (basisStrategy := basisStrategy)
     (maxSubsetCardinality := maxSubsetCardinality) (refutation := true)
+
+/-- Closed non-negativity via the Positivstellensatz `i`-th power refutation
+(Harrison's `REAL_NONLINEAR_PROVER` `tryall` loop, `i ≥ 1`).
+
+`runClosedRefutation` covers `i = 0` (target `−1`), which proves the
+*stronger* `0 < p` and so cannot apply to a non-negative `p` with a real
+zero — Motzkin's `x⁴y² + x²y⁴ + 1 − 3x²y²` vanishes at `(±1, ±1)`. This loop
+deepens the exponent: for `i = 1, 2, …, maxPower` it searches for a closed
+certificate of `−(−p)^i` against the augmented inequality list `gs ++ [−p]`.
+Under the contrapositive `−p > 0` the cone is `≥ 0` while `−(−p)^i < 0`, the
+contradiction discharged by `sos_nonneg_refutation_sound`. Returns the
+exponent `i` alongside the certificate so the elaborator can instantiate the
+soundness lemma at the right power.
+
+This is the genuinely non-SOS branch: each `i` is a fresh family of
+growing-degree CSDP solves, the degree needed is unknown a priori (Harrison
+reaches `i, d` as high as `8` on Motzkin), and rational rounding gets harder
+as the degree grows. It is gated off by default (`maxPower = 0`) and opted
+into per call via `sos (config := { maxRefutationPower := k })`.
+
+Equality hypotheses are rejected up front for the same reason as
+`runClosedRefutation`: the reduced refutation encoder does not thread
+equality cofactors. -/
+def runNonnegRefutation (p : CMvPolynomial n ℚ)
+    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+    (maxPower : Nat := 0)
+    (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
+    (basisStrategy : BasisStrategy := .newton)
+    (maxSubsetCardinality : Nat := 1) :
+    IO (Option (Nat × Certificate n)) := do
+  if !ps.isEmpty then return none
+  let augGs := gs ++ [-p]
+  for i in [1:maxPower + 1] do
+    let target : CMvPolynomial n ℚ := -((-p) ^ i)
+    let goal : Goal n := .closed target
+    match (← runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
+        (maxDepth := maxDepth) (basisStrategy := basisStrategy)
+        (maxSubsetCardinality := maxSubsetCardinality) (refutation := true)) with
+    | some cert => return some (i, cert)
+    | none => pure ()
+  return none
 
 /-- Closed/infeasibility search dispatcher. Owns the `Goal → target`
 translation (`p` for `.closed`, `-1` for `.infeasible`). Strict

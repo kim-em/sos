@@ -306,11 +306,19 @@ example : True := by
 
 /-! ## §9. Graceful failure & out-of-scope guards -/
 
--- Motzkin is nonneg but not SOS, so search must fail gracefully.
+-- Motzkin is nonneg but not SOS, so the *default* search (no power
+-- refutation) has no certificate to find and must fail gracefully.
 example : True := by
   fail_if_success
     (have : ∀ x y : ℝ, 0 ≤ x^4*y^2 + x^2*y^4 + 1 - 3*x^2*y^2 := by sos)
   trivial
+
+-- ...but `maxRefutationPower` closes it via the Positivstellensatz power
+-- refutation plus facial-reduction rational recovery (issue: non-SOS
+-- non-negative targets). Harrison's `REAL_SOS` proves the same bare
+-- Motzkin via `REAL_NONLINEAR_PROVER` at degree 8.
+example (x y : ℝ) : 0 ≤ x^4*y^2 + x^2*y^4 + 1 - 3*x^2*y^2 := by
+  sos (config := { maxRefutationPower := 1 })
 
 -- Infimum-0 strict positivity must also fail gracefully. `p = (x*y −
 -- 1)² + x²` is strictly positive everywhere on ℝ² but its infimum is

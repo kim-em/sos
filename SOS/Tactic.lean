@@ -59,6 +59,19 @@ structure Config where
   explicitly for interval-Schur-style targets where products of three or
   more constraints are expected. -/
   maxSubsetCardinality : Nat := 2
+  /-- Positivstellensatz refutation power (Harrison's `REAL_NONLINEAR_PROVER`
+  `tryall` exponent `i ≥ 1`). `0` (default) disables it. When positive, an
+  *unconstrained* closed goal `0 ≤ p` that survives the SOS and `i = 0`
+  refutation passes is retried by searching for a certificate of `−(−p)^i`
+  for `i = 1 … maxRefutationPower`; success discharges the goal via
+  `sos_nonneg_refutation_sound`. This is the only path that closes genuinely
+  non-SOS non-negative polynomials such as Motzkin's
+  `x⁴y² + x²y⁴ + 1 − 3x²y²` (whose certificate Harrison reaches at depth `8`).
+  It is off by default because each power is a fresh family of growing-degree
+  CSDP solves, the degree needed is unknown a priori, and rational rounding
+  gets harder as the degree grows — so it is slow and frequently fails. Pair
+  it with a larger `maxDepth` for hard targets. -/
+  maxRefutationPower : Nat := 0
   deriving Inhabited
 
 /-- Elaborator for `(config := …)` clauses on `sos`/`sos?`. -/
@@ -559,6 +572,48 @@ def closeSosClosedRefutation (parsed : SOS.Reify.ParsedGoal)
   mv.assign final
   Tactic.replaceMainGoal []
 
+/-- Positivstellensatz `i`-th power refutation close: discharges `0 ≤ p` via
+`sos_nonneg_refutation_sound`, where the certificate verifies the closed
+identity `−(−p)^exponent = σ_cert((gs ++ [−p]), ps)`. Unlike
+`closeSosClosedRefutation` (the `i = 0` case, which routes through the strict
+`0 < p`), this yields the non-strict `0 ≤ p` directly — the form required for
+non-negative polynomials with a real zero, such as Motzkin's. -/
+def closeSosNonnegRefutation (parsed : SOS.Reify.ParsedGoal)
+    (certE : Expr) (exponent : Nat) :
+    TacticM Unit := Tactic.withMainContext do
+  let n := parsed.atoms.size
+  let nE := Lean.mkNatLit n
+  let mv ← Tactic.getMainGoal
+  let φE ← buildFinValExpr parsed.atoms
+  let bridged ← buildHypothesisAevalProofsA n φE parsed.constraints
+  let gsListE ← gsCMvListExpr n bridged.ineqPolys
+  let psListE ← gsCMvListExpr n bridged.eqPolys
+  let hgsProof ← buildForallMemProof n φE bridged.ineqPolys bridged.ineqProofs
+  let hpsProof ← buildForallMemEqZeroProof n φE bridged.eqPolys bridged.eqProofs
+  let p ← parsedConclusionData "sos" parsed n
+  let cmvTy ← cmvType n
+  let negPE ← mkAppM ``Neg.neg #[p.cmv]
+  let nilE ← mkAppOptM ``List.nil #[some cmvTy]
+  let singletonE ← mkAppOptM ``List.cons #[some cmvTy, some negPE, some nilE]
+  let augGsListE ← mkAppM ``HAppend.hAppend #[gsListE, singletonE]
+  -- Target polynomial: `−(−p)^exponent`.
+  let expE := Lean.mkNatLit exponent
+  let powE ← mkAppM ``HPow.hPow #[negPE, expE]
+  let negPowE ← mkAppM ``Neg.neg #[powE]
+  let goalE ← mkAppOptM ``SOS.Goal.closed #[some nE, some negPowE]
+  let decProof ← buildCheckProof certE goalE augGsListE psListE
+  let hTarget ← mkAppM ``SOS.sos_nonneg_refutation_sound
+    #[p.cmv, expE, gsListE, psListE, certE, decProof, φE, hgsProof, hpsProof]
+  let eqProof_p ← buildAtomicBridgeEq n φE p.tree p.orig
+  let pE := Lean.toExpr p.tree
+  let hNonneg ← mkAppOptM ``SOS.nonneg_orig_of_aeval
+    #[some nE, some φE, some pE, some p.orig, some eqProof_p, some hTarget]
+  let final ←
+    if p.useSubBridge then mkAppM ``le_of_sub_nonneg #[hNonneg]
+    else pure hNonneg
+  mv.assign final
+  Tactic.replaceMainGoal []
+
 /-! ### Tactic surface -/
 
 syntax (name := sosTactic) "sos" Lean.Parser.Tactic.optConfig : tactic
@@ -791,7 +846,24 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
           let decompiled := decompileCertificate cert
           let certE ← certExprOfDecompiled n decompiled
           closeSosClosedRefutation parsed certE
-        | none => throwError "{tag}: search failed to find a certificate"
+        | none =>
+          -- Final fallback: the `i ≥ 1` Positivstellensatz power refutation
+          -- (Harrison's `tryall` loop), gated behind `maxRefutationPower`.
+          -- This is the only path that closes genuinely non-SOS non-negative
+          -- polynomials such as Motzkin's.
+          if cfg.maxRefutationPower == 0 then
+            throwError "{tag}: search failed to find a certificate"
+          else
+            match (← (SOS.Search.runNonnegRefutation p.tree.toCMv gsCMv psCMv
+                (maxPower := cfg.maxRefutationPower)
+                (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
+                (basisStrategy := strategy)
+                (maxSubsetCardinality := maxCard) : IO _)) with
+            | some (refutPow, cert) =>
+              let decompiled := decompileCertificate cert
+              let certE ← certExprOfDecompiled n decompiled
+              closeSosNonnegRefutation parsed certE refutPow
+            | none => throwError "{tag}: search failed to find a certificate"
       else
         throwError "{tag}: search failed to find a certificate"
   | .infeasible =>

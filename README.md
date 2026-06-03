@@ -99,8 +99,8 @@ recognise as a known operator). Constraint hypotheses can come from
 the local context or from `→`-introduced binders.
 
 The Motzkin polynomial `x⁴y² + x²y⁴ + 1 - 3x²y²` is non-negative but
-not a sum of squares (Hilbert 1888 / Motzkin 1967); `by sos`
-correctly fails to find a certificate, caught here by
+not a sum of squares (Hilbert 1888 / Motzkin 1967), so plain `by sos`
+has no certificate to find and correctly fails, caught here by
 `fail_if_success`:
 
 ```lean
@@ -110,6 +110,21 @@ example : True := by
         0 ≤ x^4 * y^2 + x^2 * y^4 + 1 - 3*x^2*y^2 := by sos)
   trivial
 ```
+
+Opting into the Positivstellensatz power refutation with
+`maxRefutationPower` closes it anyway — `by sos` negates the goal to
+`0 < -M`, searches for `-M = σ₀ + σ₁·(-M)` (Harrison's
+`REAL_NONLINEAR_PROVER`), and recovers the exact rational certificate
+from CSDP's rank-deficient solution by facial reduction:
+
+```lean
+example (x y : ℝ) : 0 ≤ x^4*y^2 + x^2*y^4 + 1 - 3*x^2*y^2 := by
+  sos (config := { maxRefutationPower := 1 })
+```
+
+This is off by default because each power is a family of
+growing-degree CSDP solves whose required degree is not known in
+advance; see [Scope and limits](#scope-and-limits).
 
 The soundness lemmas reduce to `IsSumSq.nonneg` (Mathlib) once the
 goal has been transported through the `aeval` ring-hom on CompPoly's
@@ -163,15 +178,26 @@ itself unless CompPoly is upstreamed first.
   feasibility pipeline to produce the verifiable certificate.
   Infeasibility uses `target = −1`.
 
-- **Single fixed relaxation level.** Multiplier basis sizes are set
-  once from a degree bound `D = max(deg(target), maxᵢ deg(gᵢ))`: the
-  σ₀ basis is monomials up to `⌈D/2⌉`, and each σᵢ basis is monomials
-  up to `⌈max(0, D − deg(gᵢ))/2⌉`. There is no hierarchy walk that
-  bumps the relaxation order on failure. Failures cover both
-  genuinely non-SOS non-negative polynomials (Motzkin
-  `x⁴y² + x²y⁴ + 1 − 3x²y²` is the canonical example) and goals that
-  would only succeed at a larger relaxation order than this fixed
-  search uses.
+- **Single fixed relaxation level by default.** Multiplier basis sizes
+  are set once from a degree bound `D = max(deg(target), maxᵢ deg(gᵢ))`:
+  the σ₀ basis is monomials up to `⌈D/2⌉`, and each σᵢ basis is monomials
+  up to `⌈max(0, D − deg(gᵢ))/2⌉`. The default search runs no hierarchy
+  walk that bumps the relaxation order on failure, so a goal needing a
+  higher order is left open.
+
+- **Non-SOS non-negative polynomials, opt-in.** A polynomial that is
+  non-negative but not a sum of squares (Motzkin
+  `x⁴y² + x²y⁴ + 1 − 3x²y²` is the canonical example) has no direct
+  certificate, so the default search fails. Setting
+  `maxRefutationPower := k` enables Harrison's `REAL_NONLINEAR_PROVER`
+  power refutation: for `i = 1 … k` it searches for a certificate of
+  `−(−p)^i` against `{−p ≥ 0}` (negate the goal, then refute `0 < −p`),
+  and recovers the exact rational certificate from CSDP's rank-deficient
+  boundary solution by **facial reduction** — rationalising the
+  null-space projector of the float Gram and imposing it as exact linear
+  constraints. This is off by default: each power is a family of
+  growing-degree CSDP solves, the required degree is unknown a priori,
+  and the recovery adds a symmetric eigendecomposition per block.
 
 - **Search failure is not a soundness failure.** When CSDP returns an
   unusable status, when no rounding denominator validates, or when

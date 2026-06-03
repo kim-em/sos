@@ -380,6 +380,49 @@ theorem sos_strict_product_sound
     pow_pos h_pol_pos exponent
   linarith
 
+/-- **Soundness, closed non-negativity via the Positivstellensatz `i`-th
+power refutation.**
+
+To prove `0 ≤ p` against ≥-constraints `gs` and =-constraints `ps`, ask for
+a closed certificate of `−(−p)^i` against the *augmented* inequality list
+`gs ++ [−p]`. Under the contrapositive `p < 0` (so `−p > 0`), every entry of
+the augmented list is `≥ 0`, so the cone term `σ_cert ≥ 0` and the identity
+`−(−p)^i = σ_cert` force `(−p)^i ≤ 0` — but `−p > 0` gives `(−p)^i > 0`, a
+contradiction. Hence `0 ≤ p`.
+
+This is the `i ≥ 1` branch of Harrison's `REAL_NONLINEAR_PROVER` `tryall`
+loop: the form that closes genuinely non-SOS non-negative polynomials such
+as Motzkin's. It is distinct from `sos_strict_product_sound` /
+`runClosedRefutation`, whose `i = 0` (`−1`) target proves the *stronger*
+`0 < p` and so cannot apply where `p` has a real zero (Motzkin vanishes at
+`(±1, ±1)`). Here the strict generator is `−p` itself, recovered from the
+`by_contra` hypothesis rather than from an external strict fact. -/
+theorem sos_nonneg_refutation_sound
+    (p : CMvPolynomial n ℚ) (exponent : Nat)
+    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+    (cert : Certificate n)
+    (h : cert.checks (.closed (-((-p) ^ exponent))) (gs ++ [-p]) ps = true) :
+    ∀ φ : Fin n → ℝ,
+      (∀ g ∈ gs, 0 ≤ CMvPolynomial.aeval φ g) →
+      (∀ q ∈ ps, CMvPolynomial.aeval φ q = 0) →
+      0 ≤ CMvPolynomial.aeval φ p := by
+  intro φ hgs hps
+  by_contra h_neg
+  have h_neg : CMvPolynomial.aeval φ p < 0 := not_le.mp h_neg
+  have h_negp_pos : 0 < CMvPolynomial.aeval φ (-p) := by
+    rw [CMvPolynomial.aeval_neg]; linarith
+  have hgs_aug : ∀ g ∈ gs ++ [-p], 0 ≤ CMvPolynomial.aeval φ g := by
+    intro g hg
+    rcases List.mem_append.mp hg with hin | hin
+    · exact hgs g hin
+    · have : g = -p := List.mem_singleton.mp hin
+      rw [this]; exact le_of_lt h_negp_pos
+  have h_res := sos_sound _ _ _ _ h φ hgs_aug hps
+  rw [CMvPolynomial.aeval_neg, CMvPolynomial.aeval_pow] at h_res
+  have h_pow_pos : 0 < (CMvPolynomial.aeval φ (-p)) ^ exponent :=
+    pow_pos h_negp_pos exponent
+  linarith
+
 /-- **Soundness, infeasibility refutation, with equality hypotheses.** -/
 theorem sos_infeasible_sound
     (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))

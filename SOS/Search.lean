@@ -1489,10 +1489,12 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
       out := out.push packed
     return out
   -- Per-block float null-space *projectors* `P = Σ_{null k} vₖ vₖᵀ`. The
-  -- projector is basis-independent — hence genuinely rational for a
-  -- rational subspace — unlike the arbitrary orthonormal eigenvectors a
-  -- single Jacobi sweep returns. Its columns are the rational null
-  -- directions we rationalise and impose.
+  -- projector is basis-independent — unlike the arbitrary orthonormal
+  -- eigenvectors a single Jacobi sweep returns — so it is far more often
+  -- rationally recoverable (the Euclidean projector onto a *rational*
+  -- subspace is itself rational, though its denominators can be large and
+  -- the float projector is only a good approximation when the rank cut is
+  -- right). Its columns are the candidate rational null directions.
   let projectors : Array (Array (Array Float)) := Id.run do
     let mut out : Array (Array (Array Float)) := #[]
     for b in [0:blocks.size] do
@@ -1522,6 +1524,14 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
     for b in [0:blocks.size] do
       let N := blocks[b]!.size
       let P := projectors[b]!
+      -- Rationalise each nonzero projector column to a candidate null
+      -- direction, then reduce to an independent rational basis (`rref`):
+      -- imposing every column separately piles on redundant approximate
+      -- constraints, and small inconsistencies between independently-rounded
+      -- columns can render the exact system spuriously infeasible. Each
+      -- candidate is augmented with a zero RHS so `rref` row-reduces the
+      -- homogeneous span.
+      let mut candidates : Array (Array ℚ) := #[]
       for jcol in [0:N] do
         let mut col : Array Float := #[]
         let mut cmax : Float := 0.0
@@ -1530,23 +1540,41 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
           col := col.push x
           if x.abs > cmax then cmax := x.abs
         if cmax > 1e-6 then
-          anyNull := true
-          let ur := rationaliseVec denom col
-          let m0u := upperTriApply N ((mats[0]!)[b]!) ur
-          let mut cols : Array (Array ℚ) := #[]
+          candidates := candidates.push ((rationaliseVec denom col).push 0)
+      for brow in (SOS.RatLinAlg.rref N candidates).rows do
+        let ur := brow.extract 0 N
+        anyNull := true
+        -- `Gram_b(y)·ur = 0` per component `i`, in `eliminateAll`'s
+        -- `Σ_t row[t]·y[t] + row[m] = 0` convention, so the constant
+        -- column carries `(M₀·ur)[i]` un-negated (the `gramParam` caller
+        -- flips sign because its rows use the opposite convention).
+        let m0u := upperTriApply N ((mats[0]!)[b]!) ur
+        let mut cols : Array (Array ℚ) := #[]
+        for t in [0:m] do
+          cols := cols.push (upperTriApply N ((mats[t+1]!)[b]!) ur)
+        for i in [0:N] do
+          let mut row : Array ℚ := Array.replicate (m + 1) 0
           for t in [0:m] do
-            cols := cols.push (upperTriApply N ((mats[t+1]!)[b]!) ur)
-          for i in [0:N] do
-            let mut row : Array ℚ := Array.replicate (m + 1) 0
-            for t in [0:m] do
-              row := row.set! t ((cols[t]!)[i]!)
-            row := row.set! m (m0u[i]!)
-            rows := rows.push row
+            row := row.set! t ((cols[t]!)[i]!)
+          row := row.set! m (m0u[i]!)
+          rows := rows.push row
     if anyNull then
       if let some elim := SOS.RatLinAlg.eliminateAll m rows then
+        -- Seed any *residual* free coordinates from the rounded float
+        -- solution rather than 0: when the facial constraints leave a
+        -- positive-dimensional affine space, the `free = 0` point is an
+        -- arbitrary face vertex that can fail PSD even when a point near
+        -- CSDP's (PSD) interior would pass. Set the free coordinates from
+        -- `rawY`, then back-substitute each assignment
+        -- `y[v] = expr[m] + Σ_free expr[f]·y[f]`.
         let mut y : Array ℚ := Array.replicate m 0
+        for f in elim.freeCols do
+          y := y.set! f (niceRound denom (rawY.get! f))
         for (v, expr) in elim.assignments do
-          y := y.set! v (expr[m]!)
+          let mut val := expr[m]!
+          for f in elim.freeCols do
+            val := val + (expr[f]!) * (y[f]!)
+          y := y.set! v val
         if let some Qs := multiBlockReconstructGram blocks mats y then
           let mut sigmas : List (List Nat × SOSDecomp n) := []
           let mut ok := true

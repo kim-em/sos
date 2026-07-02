@@ -231,9 +231,22 @@ end BasisStrategy
 /-- Half-ceiling: `⌈d/2⌉`. -/
 @[inline] def halfCeil (d : Nat) : Nat := (d + 1) / 2
 
-/-- The basis-degree bound for σᵢ given target degree and gᵢ degree. -/
+/-- The basis-degree bound for σᵢ given target degree and gᵢ degree.
+
+The Putinar relaxation caps `deg(σᵢ·gᵢ) ≤ relaxDeg`, where `relaxDeg =
+2·⌈targetDeg/2⌉` is the even relaxation order. Since `σᵢ` is a sum of
+squares, `deg σᵢ = 2·basisDeg`, so `basisDeg = ⌊(relaxDeg − gDeg)/2⌋`.
+Using `⌈(targetDeg − gDeg)/2⌉` (the old formula) overshoots by one
+whenever `gDeg` is odd and `targetDeg` even (e.g. `targetDeg = 10`,
+`gDeg = 1` gave `5` where `4` is correct): that extra basis degree makes
+`σᵢ·gᵢ` reach `relaxDeg + 1`, whose top coefficient must vanish, forcing
+`σᵢ`'s Gram onto a lower-dimensional face — a rank deficiency that the
+rational rounder cannot recover (the near-zero row/col rounds to a
+non-PSD matrix). Flooring keeps `σᵢ·gᵢ` within `relaxDeg` while still
+covering `targetDeg`. -/
 @[inline] def multiplierBasisDeg (targetDeg : Nat) (gDeg : Nat) : Nat :=
-  if targetDeg < gDeg then 0 else halfCeil (targetDeg - gDeg)
+  let relaxDeg := 2 * halfCeil targetDeg
+  if relaxDeg < gDeg then 0 else (relaxDeg - gDeg) / 2
 
 /-- The cofactor basis-degree bound for an equality polynomial `pⱼ`.
 The cofactor `qⱼ` needs degree headroom up to `σ₀Deg − pⱼ.totalDegree`. -/

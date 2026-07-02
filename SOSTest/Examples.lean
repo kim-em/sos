@@ -132,7 +132,8 @@ example (x : ℝ) (_h : x < 1) : 0 ≤ 1 - x := by sos
 -- Strict variable-vs-variable form: `h : x < y → 0 ≤ y − x`.
 example (x y : ℝ) (_h : x < y) : 0 ≤ y - x := by sos
 
--- Regression: `targetDeg = 6`, `g = s − 1` (`gDeg = 1`). The old
+-- Regression test: `targetDeg = 6`, `g = s − 1` (`gDeg = 1`).
+-- In a prior version
 -- `⌈(6−1)/2⌉ = 3` multiplier basis degree pushed `σ₁·g` to degree 7,
 -- one past the relaxation order, forcing a rank-deficient Gram block the
 -- rounder could not recover. The floored `⌊(6−1)/2⌋ = 2` keeps `σ₁·g`

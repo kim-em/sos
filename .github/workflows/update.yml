@@ -2,12 +2,16 @@ name: Update Lean and dependencies
 
 on:
   schedule:
-    - cron: "30 6 * * *"   # daily, 06:30 UTC
+    - cron: "30 6 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
   issues: write
+
+concurrency:
+  group: update-lean
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -39,17 +43,24 @@ jobs:
           # authenticated with GITHUB_TOKEN does not trigger `on: push`
           # workflows, so the toolchain tag is created here rather than in a
           # separate create-release workflow. Matches the ecosystem convention
-          # (batteries/aesop tag `vX.Y.Z` on each toolchain move).
+          # (batteries/aesop tag `vX.Y.Z`, including `-rcN`, on each toolchain move).
           if git diff --name-only HEAD~1 HEAD | grep -qx lean-toolchain; then
             tag="$(cut -d: -f2 lean-toolchain | tr -d '[:space:]')"
             git fetch --tags --quiet
             if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-              echo "Tag ${tag} already exists; nothing to do."
+              echo "Tag ${tag} already exists."
             else
               git tag -a "${tag}" -m "Release ${tag}"
               git push origin "${tag}"
+            fi
+            # Create the release if absent; mark rc toolchains as prerelease.
+            if gh release view "${tag}" >/dev/null 2>&1; then
+              echo "Release ${tag} already exists."
+            else
+              prerelease=""
+              case "${tag}" in *-rc*) prerelease="--prerelease";; esac
               gh release create "${tag}" --title "${tag}" \
-                --notes "Automated release for Lean version ${tag}"
+                --notes "Automated release for Lean version ${tag}" ${prerelease}
             fi
           else
             echo "lean-toolchain unchanged; no tag created."

@@ -15,11 +15,11 @@ open CPoly
 
 variable {n : Nat}
 
-/-! ### CompPoly aeval helpers
+/-! ### HexMvPoly aeval helpers
 
-CompPoly ships `@[simp]` lemmas for `aeval_C`, `aeval_X`, `aeval_add`, and
-`aeval_mul`, but not `aeval_zero`, `aeval_neg`, `aeval_sub`. We derive
-these via the ring-hom structure of `eval₂Hom`.
+The compatibility façade provides `@[simp]` lemmas for `aeval_C`, `aeval_X`,
+`aeval_add`, and `aeval_mul`. The remaining helpers are derived via the
+ring-hom structure of `eval₂Hom`.
 -/
 
 @[simp] lemma CMvPolynomial.aeval_zero {R σ : Type*}
@@ -66,7 +66,7 @@ these via the ring-hom structure of `eval₂Hom`.
 
 /-! ### Reflection: typed AST evaluation matches CMvPolynomial aeval -/
 
-/-- The bridge between the typed AST `SOS.Poly n` and CompPoly's
+/-- The bridge between the typed AST `SOS.Poly n` and HexMvPoly's
 `CMvPolynomial n ℚ`: evaluating the AST in `ℝ` agrees with evaluating
 its `CMvPolynomial` image via `aeval`. Drives the `bridgeTo` /
 `bridgeFrom` elaborator helpers. -/

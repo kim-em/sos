@@ -36,8 +36,11 @@ package sos where
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @ "main"
 
-require «CompPoly» from git
-  "https://github.com/Verified-zkEVM/CompPoly" @ "master"
+-- Temporary monorepo pin while HexMvPoly is prepared for a split release.
+-- Once released, this becomes a direct dependency on that repository.
+require Hex from git
+  "https://github.com/kim-em/hex-dev.git" @
+    "1910b223f4b1223eb939a40205af577abfd7dcbd"
 
 -- We don't set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has

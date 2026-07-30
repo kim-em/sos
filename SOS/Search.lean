@@ -2,7 +2,7 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 
-SDP encoding (CompPoly polynomials → `CSDP.Problem`), rational
+SDP encoding (HexMvPoly polynomials → `CSDP.Problem`), rational
 rounding of the float Gram-matrix solution, and the top-level
 `runSearch` driver.
 

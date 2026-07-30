@@ -127,8 +127,9 @@ growing-degree CSDP solves whose required degree is not known in
 advance; see [Scope and limits](#scope-and-limits).
 
 The soundness lemmas reduce to `IsSumSq.nonneg` (Mathlib) once the
-goal has been transported through the `aeval` ring-hom on CompPoly's
-`CMvPolynomial n ℚ`. Two design points worth flagging, both following
+goal has been transported through the `aeval` ring-hom on HexMvPoly's
+`CMvPolynomial n ℚ` compatibility façade. Two design points worth flagging,
+both following
 Harrison's [TPHOLs 2007 paper]
 (https://link.springer.com/chapter/10.1007/978-3-540-74591-4_9):
 
@@ -143,13 +144,14 @@ Harrison's [TPHOLs 2007 paper]
 
 ## Implementation notes
 
-This tactic depends on
-[`Verified-zkEVM/CompPoly`](https://github.com/Verified-zkEVM/CompPoly)
-for a kernel-decidable computational multivariate-polynomial type
-(`CMvPolynomial n ℚ`), which is what the verifier reduces certificate
-checks against. CompPoly itself depends on Mathlib. As a consequence,
-`sos` is a downstream library and cannot be migrated into Mathlib
-itself unless CompPoly is upstreamed first.
+This tactic uses
+[`Hex.MvPoly`](https://github.com/kim-em/hex-dev/tree/main/HexMvPoly)
+for its kernel-decidable computational multivariate-polynomial type. The
+temporary dependency points at the `hex-dev` monorepo while HexMvPoly is
+prepared for a split release; it will become a direct released-library pin
+before this migration is merged. This temporary aggregate pin still brings
+Mathlib transitively; removing that edge from the package graph is a merge
+condition for the follow-up direct HexMvPoly pin.
 
 ## Scope and limits
 
@@ -275,7 +277,7 @@ The tactic runs three stages on a `by sos` goal:
 | Package | Purpose |
 |---|---|
 | [`leanprover-community/mathlib4`](https://github.com/leanprover-community/mathlib4) | `IsSumSq.nonneg`, `ℝ`, `algebraMap ℚ ℝ`, `ring`, `push_cast`. |
-| [`Verified-zkEVM/CompPoly`](https://github.com/Verified-zkEVM/CompPoly) | Computational `CMvPolynomial n R` substrate; sorry/axiom-free. |
+| [`kim-em/hex-dev`](https://github.com/kim-em/hex-dev) | Temporary monorepo pin for the computational `Hex.MvPoly` substrate; replaced by the split HexMvPoly repository before merge. |
 | [`leanprover/csdp-ffi`](https://github.com/leanprover/csdp-ffi) | FFI wrapper around CSDP 6.2.0. Vendored CSDP source. |
 
 System dependencies (BLAS/LAPACK, transitively via csdp-ffi):

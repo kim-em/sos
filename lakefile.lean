@@ -38,7 +38,7 @@ require CSDP from git
 
 require HexMvPolyMathlib from git
   "https://github.com/leanprover/hex-mv-poly-mathlib.git" @
-    "fe53b6b62397a3a8c11c18193f79610f8ddba5d6"
+    "d840707ed4a0dabac2f1a8efd4b18321b33e98ca"
 
 -- We don't set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has

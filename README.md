@@ -127,8 +127,9 @@ growing-degree CSDP solves whose required degree is not known in
 advance; see [Scope and limits](#scope-and-limits).
 
 The soundness lemmas reduce to `IsSumSq.nonneg` (Mathlib) once the
-goal has been transported through the `aeval` ring-hom on CompPoly's
-`CMvPolynomial n ℚ`. Two design points worth flagging, both following
+goal has been transported through the `aeval` ring-hom on HexMvPoly's
+`CMvPolynomial n ℚ` compatibility façade. Two design points worth flagging,
+both following
 Harrison's [TPHOLs 2007 paper]
 (https://link.springer.com/chapter/10.1007/978-3-540-74591-4_9):
 
@@ -144,12 +145,13 @@ Harrison's [TPHOLs 2007 paper]
 ## Implementation notes
 
 This tactic depends on
-[`Verified-zkEVM/CompPoly`](https://github.com/Verified-zkEVM/CompPoly)
-for a kernel-decidable computational multivariate-polynomial type
-(`CMvPolynomial n ℚ`), which is what the verifier reduces certificate
-checks against. CompPoly itself depends on Mathlib. As a consequence,
-`sos` is a downstream library and cannot be migrated into Mathlib
-itself unless CompPoly is upstreamed first.
+[`HexMvPolyMathlib`](https://github.com/leanprover/hex-mv-poly-mathlib),
+the Mathlib bridge for the released
+[`Hex.MvPoly`](https://github.com/leanprover/hex-mv-poly) computational
+multivariate-polynomial library. Certificate checking reduces against
+`Hex.MvPoly`'s kernel-decidable representation, while the bridge supplies the
+Mathlib-facing evaluation and correspondence lemmas used by the soundness
+proofs.
 
 ## Scope and limits
 
@@ -275,7 +277,7 @@ The tactic runs three stages on a `by sos` goal:
 | Package | Purpose |
 |---|---|
 | [`leanprover-community/mathlib4`](https://github.com/leanprover-community/mathlib4) | `IsSumSq.nonneg`, `ℝ`, `algebraMap ℚ ℝ`, `ring`, `push_cast`. |
-| [`Verified-zkEVM/CompPoly`](https://github.com/Verified-zkEVM/CompPoly) | Computational `CMvPolynomial n R` substrate; sorry/axiom-free. |
+| [`leanprover/hex-mv-poly-mathlib`](https://github.com/leanprover/hex-mv-poly-mathlib) | Mathlib bridge for the kernel-decidable `Hex.MvPoly` computational substrate. |
 | [`leanprover/csdp-ffi`](https://github.com/leanprover/csdp-ffi) | FFI wrapper around CSDP 6.2.0. Vendored CSDP source. |
 
 System dependencies (BLAS/LAPACK, transitively via csdp-ffi):

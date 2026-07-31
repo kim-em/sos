@@ -12,8 +12,7 @@ permutation group of the problem and the resulting equality
 constraints on `Q` for CSDP to enforce, following Harrison's
 `sumofsquares_general_symmetry` (`sos.ml:1487`).
 -/
-import CompPoly.Multivariate.CMvPolynomial
-import CompPoly.Multivariate.Operations
+import SOS.HexMvPolyCompat
 import Std.Data.TreeMap
 
 namespace SOS.Symmetry

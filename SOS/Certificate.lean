@@ -3,16 +3,14 @@ Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
 import SOS.Raw
-import CompPoly.Multivariate.CMvPolynomial
-import CompPoly.Multivariate.Operations
-import CompPoly.Multivariate.MvPolyEquiv.Instances
+import SOS.HexMvPolyCompat
 import Mathlib.Data.Rat.Cast.Defs
 
 namespace SOS
 
 open CPoly
 
-/-- Convert the typed `Poly n` AST into a CompPoly polynomial with `ℚ`
+/-- Convert the typed `Poly n` AST into a Hex polynomial with `ℚ`
 coefficients. This is the bridge from our internal AST to the
 computational substrate used by the verifier. -/
 def Poly.toCMv {n : Nat} : SOS.Poly n → CMvPolynomial n ℚ

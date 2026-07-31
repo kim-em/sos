@@ -36,8 +36,9 @@ package sos where
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @ "main"
 
-require «CompPoly» from git
-  "https://github.com/Verified-zkEVM/CompPoly" @ "master"
+require HexMvPolyMathlib from git
+  "https://github.com/leanprover/hex-mv-poly-mathlib.git" @
+    "73bf7d487ab1824072e8c837d0de0696e775fbcc"
 
 -- We don't set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has

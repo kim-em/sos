@@ -15,55 +15,6 @@ open CPoly
 
 variable {n : Nat}
 
-/-! ### HexMvPoly aeval helpers
-
-The compatibility façade provides `@[simp]` lemmas for `aeval_C`, `aeval_X`,
-`aeval_add`, and `aeval_mul`. The remaining helpers are derived via the
-ring-hom structure of `eval₂Hom`.
--/
-
-@[simp] lemma CMvPolynomial.aeval_zero {R σ : Type*}
-    [CommSemiring R] [BEq R] [LawfulBEq R]
-    [CommSemiring σ] [Algebra R σ]
-    (f : Fin n → σ) :
-    CMvPolynomial.aeval f (0 : CMvPolynomial n R) = 0 := by
-  rw [CMvPolynomial.aeval_eq_eval₂]
-  exact (CMvPolynomial.eval₂Hom (algebraMap R σ) f).map_zero
-
-@[simp] lemma CMvPolynomial.aeval_one {R σ : Type*}
-    [CommSemiring R] [BEq R] [LawfulBEq R]
-    [CommSemiring σ] [Algebra R σ]
-    (f : Fin n → σ) :
-    CMvPolynomial.aeval f (1 : CMvPolynomial n R) = 1 := by
-  rw [CMvPolynomial.aeval_eq_eval₂]
-  exact (CMvPolynomial.eval₂Hom (algebraMap R σ) f).map_one
-
-@[simp] lemma CMvPolynomial.aeval_neg {R σ : Type*}
-    [CommRing R] [BEq R] [LawfulBEq R]
-    [CommRing σ] [Algebra R σ]
-    (f : Fin n → σ) (p : CMvPolynomial n R) :
-    CMvPolynomial.aeval f (-p) = -(CMvPolynomial.aeval f p) := by
-  rw [CMvPolynomial.aeval_eq_eval₂, CMvPolynomial.aeval_eq_eval₂]
-  exact (CMvPolynomial.eval₂Hom (algebraMap R σ) f).map_neg p
-
-@[simp] lemma CMvPolynomial.aeval_sub {R σ : Type*}
-    [CommRing R] [BEq R] [LawfulBEq R]
-    [CommRing σ] [Algebra R σ]
-    (f : Fin n → σ) (p q : CMvPolynomial n R) :
-    CMvPolynomial.aeval f (p - q)
-      = CMvPolynomial.aeval f p - CMvPolynomial.aeval f q := by
-  rw [CMvPolynomial.aeval_eq_eval₂, CMvPolynomial.aeval_eq_eval₂,
-      CMvPolynomial.aeval_eq_eval₂]
-  exact (CMvPolynomial.eval₂Hom (algebraMap R σ) f).map_sub p q
-
-@[simp] lemma CMvPolynomial.aeval_pow {R σ : Type*}
-    [CommSemiring R] [BEq R] [LawfulBEq R]
-    [CommSemiring σ] [Algebra R σ]
-    (f : Fin n → σ) (p : CMvPolynomial n R) (k : ℕ) :
-    CMvPolynomial.aeval f (p ^ k) = (CMvPolynomial.aeval f p) ^ k := by
-  rw [CMvPolynomial.aeval_eq_eval₂, CMvPolynomial.aeval_eq_eval₂]
-  exact (CMvPolynomial.eval₂Hom (algebraMap R σ) f).map_pow p k
-
 /-! ### Reflection: typed AST evaluation matches CMvPolynomial aeval -/
 
 /-- The bridge between the typed AST `SOS.Poly n` and HexMvPoly's

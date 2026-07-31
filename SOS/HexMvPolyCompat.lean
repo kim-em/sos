@@ -159,18 +159,22 @@ theorem aeval_eq_eval₂ {n : Nat} {R σ : Type*}
     (HexMvPolyMathlib.aeval_sub
       (cmp := Mono.lex) x p q)
 
+/-- Coefficient lookup with SOS's established polynomial-first argument order. -/
 def coeff {n : Nat} {R : Type*} [CommSemiring R]
     (p : CMvPolynomial n R) (m : CMvMonomial n) : R :=
   Hex.MvPoly.coeff m p
 
+/-- Monomials in the canonical order supplied by `Hex.MvPoly`. -/
 def monomials {n : Nat} {R : Type*} [CommSemiring R]
     (p : CMvPolynomial n R) : List (CMvMonomial n) :=
   Hex.MvPoly.monomials p
 
+/-- Compatibility alias for the polynomial's canonical monomial support. -/
 def support {n : Nat} {R : Type*} [CommSemiring R]
     (p : CMvPolynomial n R) : List (CMvMonomial n) :=
   Hex.MvPoly.support p
 
+/-- Maximum total degree among the polynomial's monomials. -/
 def totalDegree {n : Nat} {R : Type*} [CommSemiring R]
     (p : CMvPolynomial n R) : Nat :=
   Hex.MvPoly.totalDegree p

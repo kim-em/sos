@@ -86,6 +86,13 @@ nonsense rationals (e.g. `niceRound (2^66) 1.0 = (2^64-1)/2^66 ≈
     a = 1 ∧ b = 0
   | none => False
 
+#guard
+  let p : CMvPolynomial 1 ℚ :=
+    CMvPolynomial.X ⟨0, by decide⟩
+  match p.monomials with
+  | [m] => p.coeff m = 1
+  | _ => false
+
 /-! ### Degenerate `decodeSdpBlock` / `LDL.reconstruct` -/
 
 #guard

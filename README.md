@@ -144,14 +144,14 @@ Harrison's [TPHOLs 2007 paper]
 
 ## Implementation notes
 
-This tactic uses
-[`Hex.MvPoly`](https://github.com/kim-em/hex-dev/tree/main/HexMvPoly)
-for its kernel-decidable computational multivariate-polynomial type. The
-temporary dependency points at the `hex-dev` monorepo while HexMvPoly is
-prepared for a split release; it will become a direct released-library pin
-before this migration is merged. This temporary aggregate pin still brings
-Mathlib transitively; removing that edge from the package graph is a merge
-condition for the follow-up direct HexMvPoly pin.
+This tactic depends on
+[`HexMvPolyMathlib`](https://github.com/leanprover/hex-mv-poly-mathlib),
+the Mathlib bridge for the released
+[`Hex.MvPoly`](https://github.com/leanprover/hex-mv-poly) computational
+multivariate-polynomial library. Certificate checking reduces against
+`Hex.MvPoly`'s kernel-decidable representation, while the bridge supplies the
+Mathlib-facing evaluation and correspondence lemmas used by the soundness
+proofs.
 
 ## Scope and limits
 
@@ -277,7 +277,7 @@ The tactic runs three stages on a `by sos` goal:
 | Package | Purpose |
 |---|---|
 | [`leanprover-community/mathlib4`](https://github.com/leanprover-community/mathlib4) | `IsSumSq.nonneg`, `ℝ`, `algebraMap ℚ ℝ`, `ring`, `push_cast`. |
-| [`kim-em/hex-dev`](https://github.com/kim-em/hex-dev) | Temporary monorepo pin for the computational `Hex.MvPoly` substrate; replaced by the split HexMvPoly repository before merge. |
+| [`leanprover/hex-mv-poly-mathlib`](https://github.com/leanprover/hex-mv-poly-mathlib) | Mathlib bridge for the kernel-decidable `Hex.MvPoly` computational substrate. |
 | [`leanprover/csdp-ffi`](https://github.com/leanprover/csdp-ffi) | FFI wrapper around CSDP 6.2.0. Vendored CSDP source. |
 
 System dependencies (BLAS/LAPACK, transitively via csdp-ffi):

@@ -2,15 +2,5 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
-import SOS.Raw
-import SOS.Certificate
-import SOS.Verifier
-import SOS.LDL
-import SOS.RatSimplex
-import SOS.RatLinAlg
-import SOS.Symmetry
-import SOS.EqElim
-import SOS.Search
-import SOS.Reify
-import SOS.Lift
-import SOS.Tactic
+import SOS.Engine
+import SOS.Mathlib

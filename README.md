@@ -144,14 +144,12 @@ Harrison's [TPHOLs 2007 paper]
 
 ## Implementation notes
 
-This tactic depends on
-[`HexMvPolyMathlib`](https://github.com/leanprover/hex-mv-poly-mathlib),
-the Mathlib bridge for the released
-[`Hex.MvPoly`](https://github.com/leanprover/hex-mv-poly) computational
-multivariate-polynomial library. Certificate checking reduces against
-`Hex.MvPoly`'s kernel-decidable representation, while the bridge supplies the
-Mathlib-facing evaluation and correspondence lemmas used by the soundness
-proofs.
+The computational engine depends directly on the Mathlib-free
+[`Hex.MvPoly`](https://github.com/leanprover/hex-mv-poly) library. Certificate
+checking reduces against its kernel-decidable representation. The small
+Mathlib-facing layer under `SOS/Mathlib/` supplies only the real interpretation
+and operation laws needed by the soundness proofs; SOS does not depend on the
+general `hex-mv-poly-mathlib` correspondence package.
 
 ## Scope and limits
 
@@ -248,27 +246,33 @@ for the solver.
 
 The tactic runs three stages on a `by sos` goal:
 
-1. `SOS.Reify.parseGoalAtomic` walks the goal expression, collecting
+1. `SOS.Reify.parseGoalAtomic` in `SOS.Mathlib.Reify` walks the goal expression, collecting
    atomic ℝ-typed subterms into an array and producing untyped
    `SOS.Poly.Raw` ASTs for the conclusion and each constraint
    hypothesis (drawn from `intro`-binders and the local context).
-2. `SOS.Search.runSearch` builds the Putinar-form SDP, calls CSDP,
-   rounds the float Gram matrix to rationals, runs LDLᵀ, and
-   reconstructs weighted-square terms — yielding a validated
-   `SOS.Certificate n`.
-3. `SOS.Tactic.closeSos` consumes the certificate and discharges the
+2. `SOS.Engine.solve` owns the complete search policy. It builds the
+   Putinar-form SDP, calls CSDP, rounds the float Gram matrix to rationals,
+   runs LDLᵀ, and returns a structured result covering every proof route.
+3. `SOS.Mathlib.Tactic` reruns `SOS.Engine.Result.check` and discharges the
    real-arithmetic goal via the matching soundness lemma in
-   `SOS.Verifier`.
+   `SOS.Mathlib.Verifier`.
 
 | Module | What it provides |
 |---|---|
-| `SOS.Raw` | `Poly.Raw` and typed `Poly n` ASTs + reflection theorem. |
+| `SOS.Raw` | Mathlib-free `Poly.Raw` and typed `Poly n` ASTs. |
+| `SOS.Polynomial` | The narrow operational `Hex.MvPoly` API used by the engine. |
 | `SOS.Certificate` | `Goal n`, `SOSDecomp`, `Certificate n`, `checks` predicate. |
-| `SOS.Verifier` | `sos_sound`, `sos_strict_sound`, `sos_infeasible_sound`, plus `aeval_*` and `evalReal_eq_aeval` bridge lemmas. |
+| `SOS.Core` | Stable Mathlib-free data and executable-checking interface for proof-facing consumers. |
 | `SOS.LDL` | Rational LDLᵀ and Gram→weighted-square reconstruction. |
-| `SOS.Search` | Putinar-form SDP encoding, CSDP integration, rounding loop, LP-slack strict positivity. |
-| `SOS.Reify` | Atom-collecting Lean-`Expr` walker → `ParsedGoal` (atom array, untyped `SOS.Poly.Raw` for conclusion + constraints, hypothesis FVars). |
-| `SOS.Tactic` | `by sos` (search-driven) and `by sos_witness <cert>` elaborators. |
+| `SOS.Search` | Putinar-form SDP encoding, CSDP integration, rounding and reconstruction. |
+| `SOS.Engine` | Native solver façade: public `Config`, `Problem`, `Result`, `solve`, and deterministic `Result.check`. |
+| `SOS.Mathlib.Raw` | Interpretation of the raw and typed polynomial syntax over `ℝ`. |
+| `SOS.Mathlib.Certificate` | Interpretation of certificate decompositions and checked identities over `ℝ`. |
+| `SOS.Mathlib.Polynomial` | Narrow real interpretation and operation-preservation lemmas. |
+| `SOS.Mathlib.Verifier` | Certificate/result soundness over `ℝ`. |
+| `SOS.Mathlib.Reify` | Atom-collecting Lean-`Expr` walker → `ParsedGoal`. |
+| `SOS.Mathlib.Lift` | Lifting and refutation bridges for `ℕ`, `ℤ`, and `ℚ`. |
+| `SOS.Mathlib.Tactic` | `by sos`, `by sos?`, `by pure_sos`, and witness elaborators. |
 | `SOSTest.Examples` | Worked examples invoking the tactic; serves as the `lake test` driver. |
 | `SOSTest.Showcase` | Curated launch/demo examples that are also covered by `lake test`. |
 
@@ -276,8 +280,8 @@ The tactic runs three stages on a `by sos` goal:
 
 | Package | Purpose |
 |---|---|
-| [`leanprover-community/mathlib4`](https://github.com/leanprover-community/mathlib4) | `IsSumSq.nonneg`, `ℝ`, `algebraMap ℚ ℝ`, `ring`, `push_cast`. |
-| [`leanprover/hex-mv-poly-mathlib`](https://github.com/leanprover/hex-mv-poly-mathlib) | Mathlib bridge for the kernel-decidable `Hex.MvPoly` computational substrate. |
+| [`leanprover-community/mathlib4`](https://github.com/leanprover-community/mathlib4) | Real semantics, soundness proofs, reification, lifting and tactic elaboration under `SOS/Mathlib/`. |
+| [`leanprover/hex-mv-poly`](https://github.com/leanprover/hex-mv-poly) | Mathlib-free kernel-decidable multivariate-polynomial substrate. |
 | [`leanprover/csdp-ffi`](https://github.com/leanprover/csdp-ffi) | FFI wrapper around CSDP 6.2.0. Vendored CSDP source. |
 
 System dependencies (BLAS/LAPACK, transitively via csdp-ffi):

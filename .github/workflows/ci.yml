@@ -41,6 +41,9 @@ jobs:
           cd .lake/packages/CSDP
           lake script run checkNativeDeps
 
+      - name: Check Mathlib import boundary
+        run: scripts/check_mathlib_boundary.sh
+
       - name: Build SOS
         run: lake build SOS
 

@@ -14,7 +14,7 @@ appearing in the goal.
 
 The pre-pass is a no-op when the goal is already entirely over ℝ.
 -/
-import SOS.Reify
+import SOS.Mathlib.Reify
 import Mathlib.Tactic.Rify
 import Mathlib.Tactic.Linarith
 

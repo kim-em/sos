@@ -3,17 +3,16 @@ Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
 import SOS.Raw
-import SOS.HexMvPolyCompat
-import Mathlib.Data.Rat.Cast.Defs
+import SOS.Polynomial
 
 namespace SOS
 
 open CPoly
 
-/-- Convert the typed `Poly n` AST into a Hex polynomial with `ℚ`
+/-- Convert the typed `Poly n` AST into a Hex polynomial with `Rat`
 coefficients. This is the bridge from our internal AST to the
 computational substrate used by the verifier. -/
-def Poly.toCMv {n : Nat} : SOS.Poly n → CMvPolynomial n ℚ
+def Poly.toCMv {n : Nat} : SOS.Poly n → CMvPolynomial n Rat
   | .const r   => CMvPolynomial.C r
   | .var i     => CMvPolynomial.X i
   | .neg p     => -p.toCMv
@@ -23,7 +22,7 @@ def Poly.toCMv {n : Nat} : SOS.Poly n → CMvPolynomial n ℚ
   | .pow p k   => p.toCMv ^ k
 
 /-- Weighted sum-of-squares decomposition: `Σᵢ cᵢ · pᵢ²`. Each `terms`
-entry is a pair `(c, p)` with `c ∈ ℚ`, interpreted as `c · p²`.
+entry is a pair `(c, p)` with `c ∈ Rat`, interpreted as `c · p²`.
 
 Validity requires `0 ≤ cᵢ` for every entry; this is enforced by
 `Certificate.checks` via `SOSDecomp.coeffsNonneg`. Decide-checked at
@@ -31,12 +30,12 @@ certificate time rather than carried as a propositional field — direct
 `sos_witness` users can hand-write certificates, so the verifier must
 not rely on the search maintaining the invariant. -/
 structure SOSDecomp (n : Nat) where
-  terms : List (ℚ × CMvPolynomial n ℚ)
+  terms : List (Rat × CMvPolynomial n Rat)
   deriving Inhabited
 
 /-- The polynomial expansion `Σᵢ cᵢ · pᵢ²` of a weighted sum-of-squares
 decomposition. -/
-def SOSDecomp.toPoly {n : Nat} (sd : SOSDecomp n) : CMvPolynomial n ℚ :=
+def SOSDecomp.toPoly {n : Nat} (sd : SOSDecomp n) : CMvPolynomial n Rat :=
   sd.terms.foldr (fun pair acc => acc + CMvPolynomial.C pair.1 * pair.2 * pair.2) 0
 
 /-- All coefficients are non-negative; required for soundness. -/
@@ -47,15 +46,15 @@ def SOSDecomp.coeffsNonneg {n : Nat} (sd : SOSDecomp n) : Bool :=
 appropriately. -/
 inductive Goal (n : Nat) where
   /-- `p ≥ 0` over the constraint set. -/
-  | closed     (p : CMvPolynomial n ℚ)
+  | closed     (p : CMvPolynomial n Rat)
   /-- `p > 0`, certified via `p − ε ≥ 0` with `ε > 0`. -/
-  | strict     (p : CMvPolynomial n ℚ) (epsilon : ℚ) (hε : 0 < epsilon)
+  | strict     (p : CMvPolynomial n Rat) (epsilon : Rat) (hε : 0 < epsilon)
   /-- The constraint set is infeasible; certified via `−1 = σ₀ + …`. -/
   | infeasible
 
 /-- The polynomial we certify against the constraint set. Closed: `p`.
 Strict: `p − ε`. Infeasibility: `−1` (as the constant polynomial). -/
-def Goal.target {n : Nat} : Goal n → CMvPolynomial n ℚ
+def Goal.target {n : Nat} : Goal n → CMvPolynomial n Rat
   | .closed p     => p
   | .strict p ε _ => p - CMvPolynomial.C ε
   | .infeasible   => -1
@@ -78,38 +77,38 @@ structure Certificate (n : Nat) where
   sigmas : List (List Nat × SOSDecomp n)
   /-- One free polynomial cofactor `qⱼ` per equality constraint `pⱼ`.
   Empty (default) when the goal has no equality hypotheses. -/
-  eqCofs : List (CMvPolynomial n ℚ) := []
+  eqCofs : List (CMvPolynomial n Rat) := []
   deriving Inhabited
 
 /-- Product of `gs[i]` for `i ∈ idxs`. Out-of-bounds indices default to
 the constant `1`; the `Certificate.checks` bounds check ensures this
 default never fires on a well-formed certificate. -/
 def Certificate.constraintProduct {n : Nat}
-    (gs : List (CMvPolynomial n ℚ)) (idxs : List Nat) :
-    CMvPolynomial n ℚ :=
+    (gs : List (CMvPolynomial n Rat)) (idxs : List Nat) :
+    CMvPolynomial n Rat :=
   idxs.foldr (fun i acc => acc * gs.getD i 1) 1
 
 /-- Sum of `σ.toPoly · ∏_{i ∈ idxs} gs[i]` over the subset-indexed σ list. -/
 def Certificate.monoidSum {n : Nat}
     (sigmas : List (List Nat × SOSDecomp n))
-    (gs : List (CMvPolynomial n ℚ)) :
-    CMvPolynomial n ℚ :=
+    (gs : List (CMvPolynomial n Rat)) :
+    CMvPolynomial n Rat :=
   sigmas.foldr
     (fun pair acc => acc + pair.2.toPoly * Certificate.constraintProduct gs pair.1) 0
 
 /-- Sum of `qⱼ * pⱼ` over paired lists of free cofactors and equality
 polynomials. -/
 def Certificate.equalitySum {n : Nat}
-    (eqCofs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
-    CMvPolynomial n ℚ :=
+    (eqCofs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat)) :
+    CMvPolynomial n Rat :=
   (eqCofs.zip ps).foldr (fun pair acc => acc + pair.fst * pair.snd) 0
 
 /-- The full polynomial expansion
 `Σ_S σ_S · ∏_{i ∈ S} gᵢ + Σⱼ qⱼ · pⱼ` of a certificate evaluated against
 inequality constraints `gs` and equality constraints `ps`. -/
 def Certificate.toPoly {n : Nat} (c : Certificate n)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
-    CMvPolynomial n ℚ :=
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat)) :
+    CMvPolynomial n Rat :=
   Certificate.monoidSum c.sigmas gs + Certificate.equalitySum c.eqCofs ps
 
 /-- All indices in every subset are `< gs.length`. -/
@@ -122,24 +121,11 @@ def Certificate.indicesInBounds {n : Nat}
 `eqCofs` and `ps` line up, then checks the polynomial identity
 `goal.target = c.toPoly gs ps` via `decide +kernel`. -/
 def Certificate.checks {n : Nat} (c : Certificate n) (goal : Goal n)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) : Bool :=
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat)) : Bool :=
   Certificate.indicesInBounds c.sigmas gs.length &&
   c.sigmas.all (fun pair => pair.2.coeffsNonneg) &&
   (c.eqCofs.length == ps.length) &&
   decide (goal.target = c.toPoly gs ps)
-
-/-- Bridge lemma: `checks goal gs ps = true` is equivalent to the
-polynomial identity together with the bounds, coefficient-nonnegativity,
-and length matches. -/
-theorem Certificate.checks_iff {n : Nat} (c : Certificate n) (goal : Goal n)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
-    c.checks goal gs ps = true ↔
-      Certificate.indicesInBounds c.sigmas gs.length = true ∧
-      (∀ pair ∈ c.sigmas, pair.2.coeffsNonneg = true) ∧
-      c.eqCofs.length = ps.length ∧
-      goal.target = c.toPoly gs ps := by
-  unfold Certificate.checks
-  simp [decide_eq_true_eq, and_assoc, List.all_eq_true]
 
 /-! ### Building certificates from `SOS.Poly`-form data
 
@@ -150,16 +136,16 @@ coefficient is kept verbatim. `Certificate.fromDecompiled` then
 maps the AST polynomials back through `SOS.Poly.toCMv` to assemble
 a `Certificate n`. -/
 
-/-- Lift a `List (ℚ × SOS.Poly n)` of weighted-square terms to a
+/-- Lift a `List (Rat × SOS.Poly n)` of weighted-square terms to a
 `SOSDecomp n` by mapping each polynomial through `SOS.Poly.toCMv`. -/
 def SOSDecomp.fromTerms {n : Nat}
-    (terms : List (ℚ × SOS.Poly n)) : SOSDecomp n :=
+    (terms : List (Rat × SOS.Poly n)) : SOSDecomp n :=
   { terms := terms.map (fun pair => (pair.1, SOS.Poly.toCMv pair.2)) }
 
 /-- Build a `Certificate n` from `SOS.Poly`-keyed subset-indexed σ data,
 where each σ-block is a list of weighted-square terms `(c, p)`. -/
 def Certificate.fromDecompiled {n : Nat}
-    (sigmasPolys : List (List Nat × List (ℚ × SOS.Poly n)))
+    (sigmasPolys : List (List Nat × List (Rat × SOS.Poly n)))
     (eqCofPolys : List (SOS.Poly n) := []) : Certificate n :=
   { sigmas := sigmasPolys.map (fun pair => (pair.1, SOSDecomp.fromTerms pair.2)),
     eqCofs := eqCofPolys.map SOS.Poly.toCMv }
@@ -169,7 +155,7 @@ def Certificate.fromDecompiled {n : Nat}
 empty subset for σ₀ and singletons `[i]` for each σᵢ. -/
 def Certificate.fromPutinar {n : Nat}
     (sigma0 : SOSDecomp n) (sigmas : List (SOSDecomp n))
-    (eqCofs : List (CMvPolynomial n ℚ) := []) : Certificate n :=
+    (eqCofs : List (CMvPolynomial n Rat) := []) : Certificate n :=
   let indexed : List (List Nat × SOSDecomp n) :=
     ([], sigma0) :: sigmas.zipIdx.map (fun pair => ([pair.2], pair.1))
   { sigmas := indexed, eqCofs }
@@ -183,7 +169,7 @@ from strict hypotheses, while a closed certificate handles the residual
 *augmented* constraint list `gs ++ [−p]`. -/
 
 /-- Left-to-right product of a polynomial list; `1` on the empty list. -/
-def strictProductPoly {n : Nat} : List (CMvPolynomial n ℚ) → CMvPolynomial n ℚ
+def strictProductPoly {n : Nat} : List (CMvPolynomial n Rat) → CMvPolynomial n Rat
   | []      => 1
   | g :: rest => g * strictProductPoly rest
 

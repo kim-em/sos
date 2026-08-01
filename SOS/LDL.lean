@@ -12,7 +12,11 @@ correctness proofs are needed at this layer. If LDL fails (matrix is
 not PSD on its diagonal pivots) we return `none` and the search loop
 tries the next denominator.
 -/
-import SOS.Certificate
+module
+
+public import SOS.Certificate
+
+public section
 
 namespace SOS.LDL
 

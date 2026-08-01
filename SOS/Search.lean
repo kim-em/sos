@@ -35,13 +35,18 @@ closed, `-1` for infeasibility) over constraints `{gᵢ ≥ 0}` (with
   rationals over a denominator schedule, then verify the resulting
   certificate exactly via `Certificate.checks`.
 -/
-import SOS.Certificate
-import SOS.EqElim
-import SOS.LDL
-import SOS.RatLinAlg
-import SOS.RatSimplex
-import SOS.Symmetry
-import CSDP
+
+module
+
+public import SOS.Certificate
+public import SOS.EqElim
+public import SOS.LDL
+public import SOS.RatLinAlg
+public import SOS.RatSimplex
+public import SOS.Symmetry
+public import CSDP
+
+public section
 
 namespace SOS.Search
 

@@ -10,7 +10,7 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "2844bb8ff2af63fb977c949f4178e7e2e5c82f3d"
+    "ccad9e590136efc3db1ec136a9396468bd17ffb4"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @

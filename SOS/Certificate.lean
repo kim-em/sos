@@ -2,8 +2,12 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
-import SOS.Raw
-import SOS.Polynomial
+module
+
+public import SOS.Raw
+public import SOS.Polynomial
+
+@[expose] public section
 
 namespace SOS
 

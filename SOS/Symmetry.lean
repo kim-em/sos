@@ -12,8 +12,12 @@ permutation group of the problem and the resulting equality
 constraints on `Q` for CSDP to enforce, following Harrison's
 `sumofsquares_general_symmetry` (`sos.ml:1487`).
 -/
-import SOS.Polynomial
-import Std.Data.TreeMap
+module
+
+public import SOS.Polynomial
+public import Std.Data.TreeMap
+
+public section
 
 namespace SOS.Symmetry
 
@@ -44,10 +48,10 @@ partial def allPermutations (n : Nat) : Array (Array Nat) :=
 
 variable {n : Nat}
 
-/-- Local default: the all-zero monomial. Required for `Array.get!` /
+/-- The all-zero monomial. Required for `Array.get!` /
 `basis[i]!` lookups in this module — `Search.lean` provides the same
 instance, but we declare it here too so `SOS.Symmetry` builds standalone. -/
-private def zeroMono (n : Nat) : CMvMonomial n :=
+def zeroMono (n : Nat) : CMvMonomial n :=
   ⟨Array.replicate n 0, by simp⟩
 
 instance : Inhabited (CMvMonomial n) := ⟨zeroMono n⟩

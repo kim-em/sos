@@ -10,11 +10,21 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "ccad9e590136efc3db1ec136a9396468bd17ffb4"
+    "v0.1.0-mathlib-rc1"
+
+-- Keep the full Hex closure direct so downstream manifests retain the
+-- immutable semantic-version inputs rather than the mirrors' commit pins.
+require HexBasic from git
+  "https://github.com/leanprover/hex-basic.git" @
+    "v0.1.0-mathlib-rc1"
+
+require HexPoly from git
+  "https://github.com/leanprover/hex-poly.git" @
+    "v0.1.0-mathlib-rc1"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @
-    "010d49ad68446ae1638609269791ae8795be146a"
+    "v0.1.0-mathlib-rc1"
 
 -- We do not set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has

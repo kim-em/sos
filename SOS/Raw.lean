@@ -2,8 +2,6 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
-import Mathlib.Data.Real.Basic
-
 namespace SOS.Poly
 
 /-- Untyped polynomial AST with `ℕ`-valued atom indices. Built up during
@@ -52,31 +50,17 @@ namespace SOS.Poly
 /-- Cast `Raw` into the typed `Poly n` once `n ≥ r.maxAtomBound`. -/
 def Raw.cast : (n : Nat) → (r : Raw) → r.maxAtomBound ≤ n → SOS.Poly n
   | _, .const r,   _ => .const r
-  | _, .var i,     h => .var ⟨i, by simp [maxAtomBound] at h; omega⟩
+  | _, .var i,     h => .var ⟨i, Nat.lt_of_succ_le h⟩
   | n, .neg p,     h => .neg (cast n p h)
   | n, .add p q, h =>
-    .add (cast n p (le_trans (Nat.le_max_left _ _) h))
-         (cast n q (le_trans (Nat.le_max_right _ _) h))
+    .add (cast n p (Nat.le_trans (Nat.le_max_left _ _) h))
+         (cast n q (Nat.le_trans (Nat.le_max_right _ _) h))
   | n, .sub p q, h =>
-    .sub (cast n p (le_trans (Nat.le_max_left _ _) h))
-         (cast n q (le_trans (Nat.le_max_right _ _) h))
+    .sub (cast n p (Nat.le_trans (Nat.le_max_left _ _) h))
+         (cast n q (Nat.le_trans (Nat.le_max_right _ _) h))
   | n, .mul p q, h =>
-    .mul (cast n p (le_trans (Nat.le_max_left _ _) h))
-         (cast n q (le_trans (Nat.le_max_right _ _) h))
+    .mul (cast n p (Nat.le_trans (Nat.le_max_left _ _) h))
+         (cast n q (Nat.le_trans (Nat.le_max_right _ _) h))
   | n, .pow p k, h => .pow (cast n p h) k
-
-end SOS.Poly
-
-namespace SOS.Poly
-
-/-- Real-valued denotation of the typed AST under a `Fin n → ℝ` valuation. -/
-def evalReal {n : Nat} (φ : Fin n → ℝ) : SOS.Poly n → ℝ
-  | .const r   => (r : ℝ)
-  | .var i     => φ i
-  | .neg p     => -evalReal φ p
-  | .add p q   => evalReal φ p + evalReal φ q
-  | .sub p q   => evalReal φ p - evalReal φ q
-  | .mul p q   => evalReal φ p * evalReal φ q
-  | .pow p k   => evalReal φ p ^ k
 
 end SOS.Poly

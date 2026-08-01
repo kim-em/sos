@@ -4,14 +4,15 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 `sos` and `sos_witness` tactic surface.
 -/
-import SOS.Reify
-import SOS.Search
-import SOS.Verifier
-import SOS.Lift
+import SOS.Mathlib.Reify
+import SOS.Engine
+import SOS.Mathlib.Verifier
+import SOS.Mathlib.Lift
 import Lean.ToExpr
 import Lean.Elab.Tactic
 import Lean.Elab.Tactic.Config
 import Lean.Meta.Tactic.TryThis
+import Mathlib.Data.Matrix.Basic
 import Mathlib.Tactic.Ring
 import Mathlib.Tactic.NormNum
 
@@ -19,7 +20,7 @@ namespace SOS
 
 open Lean Elab Tactic Meta
 
-/-- Per-call configuration for the `sos` / `sos?` tactics. Pass as
+/- Per-call configuration for the `sos` / `sos?` tactics. Pass as
 `sos (config := { maxDepth := 3 })` or omit the clause to use defaults.
 
 * `maxDepth` — iterative-deepening cap. At each `extraDeg ∈ [0..maxDepth]`
@@ -40,40 +41,6 @@ open Lean Elab Tactic Meta
   `.dense` disables pruning entirely. A `.dense` fallback runs at
   the same `extraDeg` if the pruned variant doesn't certify, so the
   choice is a speed/sparsity knob, not a completeness one. -/
-structure Config where
-  /-- Iterative-deepening cap (see field docs above). -/
-  maxDepth : Nat := 1
-  /-- Base-2 log of the rounding-denominator cap; the cap is
-  `2 ^ maxRoundingDenomLog2`. Default exponent `66` matches Harrison's
-  HOL Light `find_rounding` (which has no artificial cap below `2^66`). -/
-  maxRoundingDenomLog2 : Nat := 66
-  /-- σ₀-basis pruning strategy. See field docs above. -/
-  basisStrategy : SOS.Search.BasisStrategy := .newton
-  /-- Internal performance knob for the constraint-product monoid (Schmüdgen
-  preordering): caps the cardinality of subsets enumerated in the σ-block
-  monoid. `1` is pure Putinar (one σᵢ per constraint, no products); higher
-  values let the search use products of constraint polynomials. The search
-  always tries Putinar (cardinality 1) first; if that fails it falls back
-  to `maxSubsetCardinality`. The default cap covers the current regression
-  suite without the combinatorial cost of larger product caps; raise it
-  explicitly for interval-Schur-style targets where products of three or
-  more constraints are expected. -/
-  maxSubsetCardinality : Nat := 2
-  /-- Positivstellensatz refutation power (Harrison's `REAL_NONLINEAR_PROVER`
-  `tryall` exponent `i ≥ 1`). `0` (default) disables it. When positive, an
-  *unconstrained* closed goal `0 ≤ p` that survives the SOS and `i = 0`
-  refutation passes is retried by searching for a certificate of `−(−p)^i`
-  for `i = 1 … maxRefutationPower`; success discharges the goal via
-  `sos_nonneg_refutation_sound`. This is the only path that closes genuinely
-  non-SOS non-negative polynomials such as Motzkin's
-  `x⁴y² + x²y⁴ + 1 − 3x²y²` (whose certificate Harrison reaches at depth `8`).
-  It is off by default because each power is a fresh family of growing-degree
-  CSDP solves, the degree needed is unknown a priori, and rational rounding
-  gets harder as the degree grows — so it is slow and frequently fails. Pair
-  it with a larger `maxDepth` for hard targets. -/
-  maxRefutationPower : Nat := 0
-  deriving Inhabited
-
 /-- Elaborator for `(config := …)` clauses on `sos`/`sos?`. -/
 declare_config_elab elabConfig Config
 
@@ -155,7 +122,7 @@ private def toCMvExpr (n : Nat) (p : SOS.Poly n) : MetaM Expr := do
 private def aevalExpr (n : Nat) (xE : Expr) (p : SOS.Poly n) : MetaM Expr := do
   let pCMv ← toCMvExpr n p
   mkAppOptM ``CPoly.CMvPolynomial.aeval #[some (Lean.mkNatLit n),
-    some ratTy, some realTy, none, none, none, some xE, some pCMv]
+    some xE, some pCMv]
 
 /-! ### Atomic-bridge helpers
 
@@ -244,8 +211,7 @@ private def buildForallMemProof (n : Nat) (xE : Expr) (gs : List (SOS.Poly n))
       #[(← mkAppOptM ``OfNat.ofNat
           #[some realTy, some (Lean.mkNatLit 0), none]),
         (← mkAppOptM ``CPoly.CMvPolynomial.aeval
-          #[some (Lean.mkNatLit n), some ratTy, some realTy,
-            none, none, none, some xE, some gFV])]
+          #[some (Lean.mkNatLit n), some xE, some gFV])]
     mkLambdaFVars #[gFV] body
   buildForallMemProofGen n gs hAevalProofs predicate
 
@@ -261,8 +227,7 @@ private def buildForallMemStrictProof (n : Nat) (xE : Expr) (gs : List (SOS.Poly
       #[(← mkAppOptM ``OfNat.ofNat
           #[some realTy, some (Lean.mkNatLit 0), none]),
         (← mkAppOptM ``CPoly.CMvPolynomial.aeval
-          #[some (Lean.mkNatLit n), some ratTy, some realTy,
-            none, none, none, some xE, some gFV])]
+          #[some (Lean.mkNatLit n), some xE, some gFV])]
     mkLambdaFVars #[gFV] body
   buildForallMemProofGen n gs hAevalProofs predicate
 
@@ -273,8 +238,7 @@ private def buildForallMemEqZeroProof (n : Nat) (xE : Expr)
   let cmvTy ← cmvType n
   let predicate ← withLocalDeclD `q cmvTy fun gFV => do
     let lhs ← mkAppOptM ``CPoly.CMvPolynomial.aeval
-      #[some (Lean.mkNatLit n), some ratTy, some realTy,
-        none, none, none, some xE, some gFV]
+      #[some (Lean.mkNatLit n), some xE, some gFV]
     let zero ← mkAppOptM ``OfNat.ofNat
       #[some realTy, some (Lean.mkNatLit 0), none]
     let body ← mkEq lhs zero
@@ -810,115 +774,57 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
       emitSosSuggestion tk (formatDecompiledCertificate decompiled) ε?
     let certE ← certExprOfDecompiled n decompiled
     closeSos parsed certE mode
-  let maxDenomLog2 := cfg.maxRoundingDenomLog2
-  let maxDepth := cfg.maxDepth
-  let strategy := cfg.basisStrategy
-  let maxCard := cfg.maxSubsetCardinality
-  match parsed.shape with
-  | .closed =>
-    let p ← parsedConclusionData s!"{tag} (closed)" parsed n
-    let goal : SOS.Goal n := .closed p.tree.toCMv
-    match (← (SOS.Search.runSearch goal gsCMv psCMv
-        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-        (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
-    | some cert => withFoundCert cert .closed none
-    | none =>
-      -- Fall through to the i=0 strict-refutation Positivstellensatz:
-      -- search for `−1 = σ₀ + σ₁·(−p)`, which proves the stronger `0 < p`
-      -- (hence `0 ≤ p`). This is Harrison's mechanism for boundary-tight
-      -- non-negativity (e.g. BBR Lemma 7.2); the `−1` target is far better
-      -- conditioned than the original `p` target.
-      --
-      -- Scoped to *unconstrained* closed goals (no `gs`/`ps`): BBR and its
-      -- kin have no hypotheses, and this keeps the extra CSDP solve off the
-      -- failure path of constrained goals (which carry their own
-      -- hypotheses, e.g. the div/mod lift). `closeSosClosedRefutation`
-      -- relies on this — it builds `sos_strict_product_sound` with the
-      -- bridged hypotheses, but the augmented-system search/round only
-      -- benefits from the `−1` target when the cone is just `{−p ≥ 0}`.
-      if gsCMv.isEmpty ∧ psCMv.isEmpty then
-        match (← (SOS.Search.runClosedRefutation p.tree.toCMv gsCMv psCMv
-            (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-            (basisStrategy := strategy)
-            (maxSubsetCardinality := maxCard) : IO _)) with
-        | some cert =>
-          let decompiled := decompileCertificate cert
-          let certE ← certExprOfDecompiled n decompiled
-          closeSosClosedRefutation parsed certE
-        | none =>
-          -- Final fallback: the `i ≥ 1` Positivstellensatz power refutation
-          -- (Harrison's `tryall` loop), gated behind `maxRefutationPower`.
-          -- This is the only path that closes genuinely non-SOS non-negative
-          -- polynomials such as Motzkin's.
-          if cfg.maxRefutationPower == 0 then
-            throwError "{tag}: search failed to find a certificate"
-          else
-            match (← (SOS.Search.runNonnegRefutation p.tree.toCMv gsCMv psCMv
-                (maxPower := cfg.maxRefutationPower)
-                (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-                (basisStrategy := strategy)
-                (maxSubsetCardinality := maxCard) : IO _)) with
-            | some (refutPow, cert) =>
-              let decompiled := decompileCertificate cert
-              let certE ← certExprOfDecompiled n decompiled
-              closeSosNonnegRefutation parsed certE refutPow
-            | none => throwError "{tag}: search failed to find a certificate"
-      else
-        throwError "{tag}: search failed to find a certificate"
-  | .infeasible =>
-    match (← (SOS.Search.runSearch .infeasible gsCMv psCMv
-        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-        (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
-    | none => throwError "{tag}: search failed to find an infeasibility certificate"
-    | some cert => withFoundCert cert .infeasible none
-  | .strict =>
-    let p ← parsedConclusionData s!"{tag} (strict)" parsed n
-    -- Path A: LP-slack `runStrict` (Harrison-free, finds a uniform ε
-    -- for non-boundary problems). Path B (fallback): strict-product
-    -- Positivstellensatz (Harrison `REAL_NONLINEAR_PROVER`), which
-    -- closes boundary-tight strict goals where no ε exists.
-    match (← (SOS.Search.runStrict p.tree.toCMv gsCMv psCMv
-        (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-        (basisStrategy := strategy)
-        (maxSubsetCardinality := maxCard) : IO _)) with
-    | some res =>
-      let εE := Lean.toExpr res.ε
-      let hεProof ← buildStrictHεProof εE
-      withFoundCert res.cert (.strict εE hεProof) (some res.ε)
-    | none =>
-      -- Strict-hypothesis indices within `gsCMv` (which preserves the
-      -- order of non-equality constraints from `parsed.constraints`).
-      let strictIdxs : List Nat := Id.run do
-        let mut idxs : Array Nat := #[]
-        let mut ineqIdx : Nat := 0
-        for c in parsed.constraints do
-          match c.kind with
-          | .pos =>
-            idxs := idxs.push ineqIdx
-            ineqIdx := ineqIdx + 1
-          | .nonneg | .nonpos =>
-            ineqIdx := ineqIdx + 1
-          | .eq => pure ()
-        return idxs.toList
-      match (← (SOS.Search.runStrictProduct p.tree.toCMv gsCMv strictIdxs psCMv
-          (maxRoundingDenomLog2 := maxDenomLog2) (maxDepth := maxDepth)
-          (basisStrategy := strategy)
-          (maxSubsetCardinality := maxCard) : IO _)) with
-      | none =>
-        throwError "{tag}: search failed to find a strict-positivity certificate"
-      | some res =>
-        let decompiled := decompileCertificate res.cert
-        if let some tk := suggest? then
-          let certText := formatDecompiledCertificate decompiled
-          let suggestion :=
-            s!"sos_witness {certText} with exponent := {res.exponent}"
-          let sugg : Lean.Meta.Tactic.TryThis.Suggestion :=
-            { suggestion := .string suggestion }
-          Lean.Meta.Tactic.TryThis.addSuggestion tk sugg
-        let certE ← certExprOfDecompiled n decompiled
-        closeSosStrictProduct parsed certE res.exponent
+  let strictIdxs : List Nat := Id.run do
+    let mut idxs : Array Nat := #[]
+    let mut ineqIdx : Nat := 0
+    for c in parsed.constraints do
+      match c.kind with
+      | .pos =>
+        idxs := idxs.push ineqIdx
+        ineqIdx := ineqIdx + 1
+      | .nonneg | .nonpos =>
+        ineqIdx := ineqIdx + 1
+      | .eq => pure ()
+    return idxs.toList
+  let problem : SOS.Engine.Problem n ← match parsed.shape with
+    | .closed =>
+      let p ← parsedConclusionData s!"{tag} (closed)" parsed n
+      pure (.closed p.tree.toCMv gsCMv psCMv)
+    | .strict =>
+      let p ← parsedConclusionData s!"{tag} (strict)" parsed n
+      pure (.strict p.tree.toCMv gsCMv strictIdxs psCMv)
+    | .infeasible =>
+      pure (.infeasible gsCMv psCMv)
+  let some result ← (SOS.Engine.solve cfg problem : IO _) |
+    throwError "{tag}: search failed to find a certificate"
+  unless result.check problem do
+    throwError "{tag}: internal error: search returned an invalid certificate"
+  match result with
+  | .closed cert =>
+    withFoundCert cert .closed none
+  | .infeasible cert =>
+    withFoundCert cert .infeasible none
+  | .strict epsilon _ cert =>
+    let εE := Lean.toExpr epsilon
+    let hεProof ← buildStrictHεProof εE
+    withFoundCert cert (.strict εE hεProof) (some epsilon)
+  | .closedRefutation cert =>
+    let certE ← certExprOfDecompiled n (decompileCertificate cert)
+    closeSosClosedRefutation parsed certE
+  | .nonnegRefutation power cert =>
+    let certE ← certExprOfDecompiled n (decompileCertificate cert)
+    closeSosNonnegRefutation parsed certE power
+  | .strictProduct _ power cert =>
+    let decompiled := decompileCertificate cert
+    if let some tk := suggest? then
+      let certText := formatDecompiledCertificate decompiled
+      let suggestion :=
+        s!"sos_witness {certText} with exponent := {power}"
+      let sugg : Lean.Meta.Tactic.TryThis.Suggestion :=
+        { suggestion := .string suggestion }
+      Lean.Meta.Tactic.TryThis.addSuggestion tk sugg
+    let certE ← certExprOfDecompiled n decompiled
+    closeSosStrictProduct parsed certE power
 
 /-- Detect whether the *original* goal (before any lift / refute step)
 has a ℕ/ℤ ≤/</= conclusion at its head after stripping leading binders.

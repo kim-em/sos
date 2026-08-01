@@ -56,7 +56,7 @@ coefficients of `p`. The true Gram matrix realising `σ = zᵀ Q z = p`
 has rational entries whose denominators divide this; using it as a
 rounding grid lets the rounder land on the exact rational matrix
 when CSDP returns a near-true float solution. -/
-def polyDenom {n : Nat} (p : CMvPolynomial n ℚ) : Nat :=
+def polyDenom {n : Nat} (p : CMvPolynomial n Rat) : Nat :=
   p.monomials.foldl (fun acc m => Nat.lcm acc (p.coeff m).den) 1
 
 /-! ### Monomial-basis enumeration -/
@@ -111,7 +111,7 @@ membership test is an LP:
   `∃ λ ≥ 0 : Σᵢ λᵢ = 1, Σᵢ λᵢ · exp(mᵢ) = 2·exp(m)`
 
 where `m₁, …, mₖ` are the support exponents of `target`. We solve
-this exactly in `ℚ` via `RatSimplex` — float-based solvers cannot
+this exactly in `Rat` via `RatSimplex` — float-based solvers cannot
 soundly decide `λᵢ ≥ 0`. -/
 
 /-- Per-coordinate max exponent across the support. Any point in
@@ -133,11 +133,11 @@ Two layers, cheapest first:
    max support exponent for any `i`, reject. Sound for any point in
    the convex hull.
 2. **Exact LP feasibility.** Otherwise, solve the membership LP via
-   Phase-1 simplex over `ℚ`.
+   Phase-1 simplex over `Rat`.
 
 Empty support means `target = 0`; we conservatively return `false`
 (no σ₀ basis monomial admissible). -/
-def isInHalfNewton (target : CMvPolynomial n ℚ) (m : CMvMonomial n) :
+def isInHalfNewton (target : CMvPolynomial n Rat) (m : CMvMonomial n) :
     Bool := Id.run do
   let targetMonos : Array (CMvMonomial n) := target.monomials.toArray
   if targetMonos.isEmpty then return false
@@ -148,20 +148,20 @@ def isInHalfNewton (target : CMvPolynomial n ℚ) (m : CMvMonomial n) :
   --   row 0 (normalisation):  Σ λᵢ = 1
   --   row j+1 (var j):         Σ λᵢ · mᵢ[j] = 2·m[j]
   let k := targetMonos.size
-  let mut A : Array (Array ℚ) := Array.mkEmpty (n + 1)
-  let mut b : Array ℚ := Array.mkEmpty (n + 1)
-  let mut normRow : Array ℚ := Array.mkEmpty k
+  let mut A : Array (Array Rat) := Array.mkEmpty (n + 1)
+  let mut b : Array Rat := Array.mkEmpty (n + 1)
+  let mut normRow : Array Rat := Array.mkEmpty k
   for _ in [0:k] do normRow := normRow.push 1
   A := A.push normRow
   b := b.push 1
   for j in [0:n] do
-    let mut row : Array ℚ := Array.mkEmpty k
+    let mut row : Array Rat := Array.mkEmpty k
     for i in [0:k] do
       let e : Nat := (targetMonos[i]!)[j]!
-      row := row.push (e : ℚ)
+      row := row.push (e : Rat)
     A := A.push row
     let bj : Nat := 2 * m[j]!
-    b := b.push (bj : ℚ)
+    b := b.push (bj : Rat)
   return RatSimplex.isFeasibleEqLP A b
 
 /-- Half-Newton-polytope basis for σ₀: those monomials `m` with
@@ -170,7 +170,7 @@ def isInHalfNewton (target : CMvPolynomial n ℚ) (m : CMvMonomial n) :
 This is Reznick's tightest necessary condition for unconstrained σ₀:
 any monomial that can appear in any `qⱼ` of `target = Σⱼ qⱼ²` lies in
 this set. -/
-def newtonBasis (target : CMvPolynomial n ℚ) (deg : Nat) :
+def newtonBasis (target : CMvPolynomial n Rat) (deg : Nat) :
     Array (CMvMonomial n) :=
   if target.monomials.isEmpty then #[]
   else (monomialsUpTo n deg).filter (fun m => isInHalfNewton target m)
@@ -180,7 +180,7 @@ enumerates the rectangular per-variable half-degree box, filters by
 half-Newton membership, and reverses the result so high-degree terms
 come first and the constant monomial is last. The order matters for the
 Harrison-style sparse eliminator used by the symmetry-reduced path. -/
-private def harrisonNewtonBasis (target : CMvPolynomial n ℚ) :
+private def harrisonNewtonBasis (target : CMvPolynomial n Rat) :
     Array (CMvMonomial n) := Id.run do
   if target.monomials.isEmpty then return #[]
   let mut bounds : Array Nat := Array.replicate n 0
@@ -218,7 +218,7 @@ inductive BasisStrategy where
 namespace BasisStrategy
 
 /-- Compute the σ₀ basis at the given degree under this strategy. -/
-def basisAt (s : BasisStrategy) (target : CMvPolynomial n ℚ)
+def basisAt (s : BasisStrategy) (target : CMvPolynomial n Rat)
     (deg : Nat) : Array (CMvMonomial n) :=
   match s with
   | .dense => monomialsUpTo n deg
@@ -250,7 +250,7 @@ higher cardinalities are Schmüdgen-style preordering blocks. -/
 structure BlockSpec (n : Nat) where
   idxs : List Nat := []
   basis : Array (CMvMonomial n)
-  multiplier : CMvPolynomial n ℚ
+  multiplier : CMvPolynomial n Rat
 
 instance : Inhabited (BlockSpec n) where
   default := { idxs := [], basis := #[], multiplier := CMvPolynomial.C 0 }
@@ -264,7 +264,7 @@ polynomial `pⱼ`. The cofactor coefficients are unrestricted in sign
 and encoded via two LP diagonal blocks (`x⁺`, `x⁻`) downstream. -/
 structure EqCofactorSpec (n : Nat) where
   basis  : Array (CMvMonomial n)
-  eqPoly : CMvPolynomial n ℚ
+  eqPoly : CMvPolynomial n Rat
 
 instance : Inhabited (EqCofactorSpec n) where
   default := { basis := #[], eqPoly := CMvPolynomial.C 0 }
@@ -282,13 +282,13 @@ generated in lex order, products are accumulated incrementally to avoid
 recomputation. Constant-polynomial constraints are filtered (their
 inclusion in a product is redundant). -/
 def enumerateConstraintProducts (maxDeg maxCard : Nat)
-    (gs : Array (CMvPolynomial n ℚ)) :
-    Array (List Nat × CMvPolynomial n ℚ) := Id.run do
-  let mut results : Array (List Nat × CMvPolynomial n ℚ) := #[]
+    (gs : Array (CMvPolynomial n Rat)) :
+    Array (List Nat × CMvPolynomial n Rat) := Id.run do
+  let mut results : Array (List Nat × CMvPolynomial n Rat) := #[]
   if maxCard = 0 then return results
   let count := gs.size
   -- Level 1: singletons (filter constants and degree-overflow).
-  let mut prev : Array (List Nat × CMvPolynomial n ℚ) := #[]
+  let mut prev : Array (List Nat × CMvPolynomial n Rat) := #[]
   for i in [0:count] do
     let g := gs.getD i 0
     if g.totalDegree = 0 then continue
@@ -300,7 +300,7 @@ def enumerateConstraintProducts (maxDeg maxCard : Nat)
   -- element is the maximum).
   for _ in [1:maxCard] do
     if prev.isEmpty then break
-    let mut next : Array (List Nat × CMvPolynomial n ℚ) := #[]
+    let mut next : Array (List Nat × CMvPolynomial n Rat) := #[]
     for (idxs, prod) in prev do
       let startIdx := match idxs.getLast? with
         | some k => k + 1
@@ -337,9 +337,9 @@ encoding; iterative-deepening drivers loop `extraDeg = 0, 1, …`.
 exact-rational LP). The pruning is only applied to σ₀ — product
 multipliers σ_S have no analogous heuristic. The deepening driver is
 responsible for falling back to `.dense` if a pruned attempt fails. -/
-def buildBlocks (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ))
-    (ps : List (CMvPolynomial n ℚ) := []) (extraDeg : Nat := 0)
+def buildBlocks (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat))
+    (ps : List (CMvPolynomial n Rat) := []) (extraDeg : Nat := 0)
     (strategy : BasisStrategy := .dense)
     (maxSubsetCardinality : Nat := 1) :
     Array (BlockSpec n) := Id.run do
@@ -377,8 +377,8 @@ degree `cofactorBasisDeg σ₀Deg deg(pⱼ)`, computed against the same
 iterative-deepening parameter: a relaxation that grows σ₀ by `extraDeg`
 in basis (i.e. by `2 * extraDeg` in polynomial degree) needs the
 matching headroom on each cofactor `qⱼ`. -/
-def buildEqCofactorSpecs (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+def buildEqCofactorSpecs (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (extraDeg : Nat := 0) : Array (EqCofactorSpec n) := Id.run do
   let targetDeg := target.totalDegree
   let maxGDeg := gs.foldl (fun acc g => Nat.max acc g.totalDegree) 0
@@ -395,17 +395,17 @@ def buildEqCofactorSpecs (target : CMvPolynomial n ℚ)
 
 /-! ### Rational ↔ Float -/
 
-@[inline] def ratToFloat (q : ℚ) : Float :=
+@[inline] def ratToFloat (q : Rat) : Float :=
   Float.ofInt q.num / Float.ofInt q.den
 
 /-! ### Polynomial product accessors -/
 
 /-- For block `b`, compute the polynomial `z_b[j] · z_b[k] · g_b`. -/
-private def blockProduct (block : BlockSpec n) (j k : Nat) : CMvPolynomial n ℚ :=
-  let mj : CMvPolynomial n ℚ :=
-    CMvPolynomial.monomial block.basis[j]! (1 : ℚ)
-  let mk : CMvPolynomial n ℚ :=
-    CMvPolynomial.monomial block.basis[k]! (1 : ℚ)
+private def blockProduct (block : BlockSpec n) (j k : Nat) : CMvPolynomial n Rat :=
+  let mj : CMvPolynomial n Rat :=
+    CMvPolynomial.monomial block.basis[j]! (1 : Rat)
+  let mk : CMvPolynomial n Rat :=
+    CMvPolynomial.monomial block.basis[k]! (1 : Rat)
   mj * mk * block.multiplier
 
 /-! ### Cached block products
@@ -422,19 +422,19 @@ structure CachedProduct (n : Nat) where
   blockIdx : Nat
   j        : Nat
   k        : Nat
-  support  : Array (CMvMonomial n × ℚ)
+  support  : Array (CMvMonomial n × Rat)
 
 /-- One cached `(equality j, basis index b)` product `monomial_b · pⱼ`
 as its sparse support. -/
 structure CachedEqProduct (n : Nat) where
   eqIdx    : Nat
   basisIdx : Nat
-  support  : Array (CMvMonomial n × ℚ)
+  support  : Array (CMvMonomial n × Rat)
 
 /-- Compute `monomial_b · pⱼ` as a polynomial. -/
 private def eqProduct (spec : EqCofactorSpec n) (b : Nat) :
-    CMvPolynomial n ℚ :=
-  let mb : CMvPolynomial n ℚ := CMvPolynomial.monomial spec.basis[b]! (1 : ℚ)
+    CMvPolynomial n Rat :=
+  let mb : CMvPolynomial n Rat := CMvPolynomial.monomial spec.basis[b]! (1 : Rat)
   mb * spec.eqPoly
 
 /-! ### CSDP problem construction -/
@@ -475,8 +475,8 @@ free in sign. Encode `cⱼ_b = x⁺ᵢ − x⁻ᵢ` and require `x⁺ ≥ 0`, `x
 two diagonal LP blocks of width `Σⱼ |basisⱼ|`. Trace cost gives these
 blocks zero weight — otherwise the objective drives `x⁺` and `x⁻` to
 infinity together. -/
-def buildSdp (target : CMvPolynomial n ℚ) (gs : List (CMvPolynomial n ℚ))
-    (mode : SdpMode := .feasibility) (ps : List (CMvPolynomial n ℚ) := [])
+def buildSdp (target : CMvPolynomial n Rat) (gs : List (CMvPolynomial n Rat))
+    (mode : SdpMode := .feasibility) (ps : List (CMvPolynomial n Rat) := [])
     (extraDeg : Nat := 0) (strategy : BasisStrategy := .dense)
     (maxSubsetCardinality : Nat := 1) :
     CSDP.Problem × Array (BlockSpec n) × Array (EqCofactorSpec n) ×
@@ -537,7 +537,7 @@ def buildSdp (target : CMvPolynomial n ℚ) (gs : List (CMvPolynomial n ℚ))
         for j in [0:bsize] do
           for k in [j:bsize] do
             let prod := blockProduct block j k
-            let mut support : Array (CMvMonomial n × ℚ) := #[]
+            let mut support : Array (CMvMonomial n × Rat) := #[]
             for m in prod.monomials do
               let c := prod.coeff m
               if c ≠ 0 then
@@ -551,7 +551,7 @@ def buildSdp (target : CMvPolynomial n ℚ) (gs : List (CMvPolynomial n ℚ))
         let spec := eqSpecs[eqIdx]!
         for b in [0:spec.size] do
           let prod := eqProduct spec b
-          let mut support : Array (CMvMonomial n × ℚ) := #[]
+          let mut support : Array (CMvMonomial n × Rat) := #[]
           for m in prod.monomials do
             let c := prod.coeff m
             if c ≠ 0 then
@@ -644,19 +644,21 @@ above `2^48`) handles candidates at this scale without saturation
 `polyDenom target`, constraint denoms, and cross denoms — against the
 cap `2 ^ maxRoundingDenomLog2` (default exponent `66`, i.e. `2^66`,
 matching Harrison). -/
-def niceDenominators : List ℚ :=
-  let smalls : List ℚ := (List.range 31).map (fun i => (i + 1 : ℚ))
-  let bigs : List ℚ := (List.range 62).map (fun i => (2 ^ (i + 5) : ℚ))
+def niceDenominators : List Rat :=
+  let smalls : List Rat :=
+    (List.range 31).map (fun i : Nat => Rat.ofInt (Int.ofNat (i + 1)))
+  let bigs : List Rat :=
+    (List.range 62).map (fun i : Nat => (2 : Rat) ^ (i + 5))
   smalls ++ bigs
 
 /-- Exact rational value of a finite, non-NaN `Float`. Decomposes `x`
 as `s * 2^i` with `s ∈ [0.5, 1)` (via `frExp`), then multiplies the
 significand by `2^53` so the mantissa becomes an exact integer below
-`2^53` (within `Float.toUInt64`'s safe range). The result is a `ℚ`
+`2^53` (within `Float.toUInt64`'s safe range). The result is a `Rat`
 that equals `x` exactly. Returns `0` on non-finite input — callers
 should not feed NaN/Inf, but a defensive default keeps the rounder
 total. -/
-private def floatToRatExact (x : Float) : ℚ :=
+private def floatToRatExact (x : Float) : Rat :=
   if !x.isFinite then 0
   else if x == 0.0 then 0
   else
@@ -666,15 +668,15 @@ private def floatToRatExact (x : Float) : ℚ :=
     -- integer of absolute value `< 2^53`, well within `UInt64`.
     let mantissa : Nat := (s.scaleB 53).toUInt64.toNat
     let e : Int := i - 53
-    let absRat : ℚ :=
-      if e ≥ 0 then (mantissa : ℚ) * ((2 : ℚ) ^ e.toNat)
-      else (mantissa : ℚ) / ((2 : ℚ) ^ (-e).toNat)
+    let absRat : Rat :=
+      if e ≥ 0 then (mantissa : Rat) * ((2 : Rat) ^ e.toNat)
+      else (mantissa : Rat) / ((2 : Rat) ^ (-e).toNat)
     if x < 0 then -absRat else absRat
 
 /-- Round-half-away-from-zero on a rational, returning the nearest
 integer. For `q = num/den` with `den > 0`, `|⌊|q| + 1/2⌋ = (2·|num| +
 den) / (2·den)` (floor division on positive arguments). -/
-private def roundHalfAwayFromZero (q : ℚ) : Int :=
+private def roundHalfAwayFromZero (q : Rat) : Int :=
   let absNum : Nat := q.num.natAbs
   let den : Nat := q.den
   let absRound : Nat := (2 * absNum + den) / (2 * den)
@@ -690,7 +692,7 @@ typical bounded CSDP Gram entries all land here). For larger `d`,
 switches to exact rational arithmetic via `floatToRatExact` to avoid
 the silent `Float.toUInt64` saturation that the fast path suffers
 above `2^64`. -/
-def niceRound (d : ℚ) (x : Float) : ℚ :=
+def niceRound (d : Rat) (x : Float) : Rat :=
   if d.den == 1 && d.num.natAbs ≤ (1 <<< 48 : Nat) then
     -- Fast Float path: `x * d` fits in `Float`'s mantissa for any
     -- CSDP-bounded `x` with several bits of headroom, and the
@@ -699,23 +701,23 @@ def niceRound (d : ℚ) (x : Float) : ℚ :=
     let nSigned : Int :=
       if x < 0 then -(((-x) * dFloat + 0.5).toUInt64.toNat : Int)
       else (x * dFloat + 0.5).toUInt64.toNat
-    (nSigned : ℚ) / d
+    (nSigned : Rat) / d
   else
     -- Exact rational path. Slower (Rat multiplication at ~`2^53`
     -- denominators) but correct for arbitrarily large `d`.
-    let xRat : ℚ := floatToRatExact x
+    let xRat : Rat := floatToRatExact x
     let n : Int := roundHalfAwayFromZero (xRat * d)
-    (n : ℚ) / d
+    (n : Rat) / d
 
 /-! ### Decoding `Solution.X` -/
 
 /-- Extract the upper-triangle of a column-major n×n SDP block as a flat
-`Array ℚ` after rational rounding. The CSDP `.sdp` block stores
+`Array Rat` after rational rounding. The CSDP `.sdp` block stores
 column-major, so element `(row, col)` is at index `col * n + row`. -/
-def decodeSdpBlock (denom : ℚ) (n : Nat) (entries : FloatArray) :
-    Option (Array ℚ) := Id.run do
+def decodeSdpBlock (denom : Rat) (n : Nat) (entries : FloatArray) :
+    Option (Array Rat) := Id.run do
   if entries.size ≠ n * n then return none
-  let mut acc : Array ℚ := #[]
+  let mut acc : Array Rat := #[]
   for i in [0:n] do
     for j in [i:n] do
       let v := entries.get! (j * n + i)
@@ -723,9 +725,9 @@ def decodeSdpBlock (denom : ℚ) (n : Nat) (entries : FloatArray) :
   return some acc
 
 /-- Decode the full primal solution into per-block rational Gram matrices. -/
-def decodeSolution (sol : CSDP.Solution) (denom : ℚ) :
-    Option (Array (Array ℚ)) := Id.run do
-  let mut acc : Array (Array ℚ) := #[]
+def decodeSolution (sol : CSDP.Solution) (denom : Rat) :
+    Option (Array (Array Rat)) := Id.run do
+  let mut acc : Array (Array Rat) := #[]
   for b in sol.X do
     match b with
     | .sdp n entries =>
@@ -736,7 +738,7 @@ def decodeSolution (sol : CSDP.Solution) (denom : ℚ) :
       -- never returns `.diag` blocks for this encoding. Handle them as
       -- 1×1 sub-Grams in case the encoding changes.
       if entries.size ≠ n then return none
-      let mut diag : Array ℚ := #[]
+      let mut diag : Array Rat := #[]
       for i in [0:n] do
         diag := diag.push (niceRound denom (entries.get! i))
       acc := acc.push diag
@@ -849,20 +851,20 @@ private def unscaleSolution (sol : CSDP.Solution) (xShift : Int) :
 
 /-! ### Top-level search driver -/
 
-/-- Convert a basis of monomials into the `Array (CMvPolynomial n ℚ)`
+/-- Convert a basis of monomials into the `Array (CMvPolynomial n Rat)`
 that `LDL.reconstruct` expects. -/
 def basisAsPolys (basis : Array (CMvMonomial n)) :
-    Array (CMvPolynomial n ℚ) :=
-  basis.map (fun m => CMvPolynomial.monomial m (1 : ℚ))
+    Array (CMvPolynomial n Rat) :=
+  basis.map (fun m => CMvPolynomial.monomial m (1 : Rat))
 
 /-- Decode an equality cofactor from the diagonal LP blocks: for each
 basis monomial `m_b` of cofactor `j`, the coefficient is
 `x⁺[idx] − x⁻[idx]` where `idx = cumOffset[j] + b`. Returns the
 polynomial `qⱼ = Σ_b coef_b · m_b`. -/
 def decodeCofactorBlock (eqSpec : EqCofactorSpec n)
-    (xPosDiag : Array ℚ) (xNegDiag : Array ℚ) (offset : Nat) :
-    Option (CMvPolynomial n ℚ) := Id.run do
-  let mut q : CMvPolynomial n ℚ := CMvPolynomial.C 0
+    (xPosDiag : Array Rat) (xNegDiag : Array Rat) (offset : Nat) :
+    Option (CMvPolynomial n Rat) := Id.run do
+  let mut q : CMvPolynomial n Rat := CMvPolynomial.C 0
   for b in [0:eqSpec.size] do
     let some xp := xPosDiag[offset + b]? | return none
     let some xn := xNegDiag[offset + b]? | return none
@@ -874,10 +876,10 @@ def decodeCofactorBlock (eqSpec : EqCofactorSpec n)
 /-- Try one denominator: round Gram matrices, reconstruct via LDL,
 decode cofactors, build a Certificate, check it. Returns `none` if any
 step fails. -/
-def tryDenominator (gs : List (CMvPolynomial n ℚ))
-    (ps : List (CMvPolynomial n ℚ))
+def tryDenominator (gs : List (CMvPolynomial n Rat))
+    (ps : List (CMvPolynomial n Rat))
     (blocks : Array (BlockSpec n)) (eqSpecs : Array (EqCofactorSpec n))
-    (sol : CSDP.Solution) (denom : ℚ)
+    (sol : CSDP.Solution) (denom : Rat)
     (goal : Goal n) : Option (Certificate n) := Id.run do
   let some Qs := decodeSolution sol denom | return none
   let hasEqs := !ps.isEmpty
@@ -891,12 +893,12 @@ def tryDenominator (gs : List (CMvPolynomial n ℚ))
       LDL.reconstruct block.size Q (basisAsPolys block.basis)
       | return none
     sigmas := sigmas.push (block.idxs, { terms := sigmaTerms })
-  let mut eqCofs : List (CMvPolynomial n ℚ) := []
+  let mut eqCofs : List (CMvPolynomial n Rat) := []
   if hasEqs then
     let some xPosDiag := Qs[blocks.size]? | return none
     let some xNegDiag := Qs[blocks.size + 1]? | return none
     let mut offset : Nat := 0
-    let mut acc : Array (CMvPolynomial n ℚ) := #[]
+    let mut acc : Array (CMvPolynomial n Rat) := #[]
     for spec in eqSpecs do
       let some q := decodeCofactorBlock spec xPosDiag xNegDiag offset
         | return none
@@ -932,15 +934,15 @@ private def upperTriPair (N idx : Nat) : Nat × Nat := Id.run do
   return (0, 0)
 
 /-- Add `delta` to an augmented dense row at variable column `idx`. -/
-private def addVarCoeff (row : Array ℚ) (idx : Nat) (delta : ℚ) :
-    Array ℚ :=
+private def addVarCoeff (row : Array Rat) (idx : Nat) (delta : Rat) :
+    Array Rat :=
   row.set! idx (row[idx]! + delta)
 
 /-- Build the exact equality system for a pure SOS Gram matrix:
 coefficient-matching equations plus σ₀ Gram symmetry equations. -/
-private def symmetricPureEquations (target : CMvPolynomial n ℚ)
+private def symmetricPureEquations (target : CMvPolynomial n Rat)
     (block : BlockSpec n) (symmetries : Array (Array Nat)) :
-    Option (Array (Array ℚ) × Array (CMvMonomial n)) := Id.run do
+    Option (Array (Array Rat) × Array (CMvMonomial n)) := Id.run do
   let N := block.size
   let numVars := upperTriCount N
   let mut monos : Array (CMvMonomial n) := #[]
@@ -949,11 +951,11 @@ private def symmetricPureEquations (target : CMvPolynomial n ℚ)
     if !monoIndex.contains m then
       monoIndex := monoIndex.insert m monos.size
       monos := monos.push m
-  let mut cached : Array (Nat × Nat × Array (CMvMonomial n × ℚ)) := #[]
+  let mut cached : Array (Nat × Nat × Array (CMvMonomial n × Rat)) := #[]
   for i in [0:N] do
     for j in [i:N] do
       let prod := blockProduct block i j
-      let mut support : Array (CMvMonomial n × ℚ) := #[]
+      let mut support : Array (CMvMonomial n × Rat) := #[]
       for m in prod.monomials do
         let c := prod.coeff m
         if c ≠ 0 then
@@ -962,13 +964,13 @@ private def symmetricPureEquations (target : CMvPolynomial n ℚ)
             monoIndex := monoIndex.insert m monos.size
             monos := monos.push m
       cached := cached.push (i, j, support)
-  let mut rows : Array (Array ℚ) := #[]
+  let mut rows : Array (Array Rat) := #[]
   for m in monos do
-    let mut row : Array ℚ := Array.replicate (numVars + 1) 0
+    let mut row : Array Rat := Array.replicate (numVars + 1) 0
     for (i, j, support) in cached do
       for (m', c) in support do
         if m' = m then
-          let factor : ℚ := if i = j then 1 else 2
+          let factor : Rat := if i = j then 1 else 2
           let idx := upperTriIndex N i j
           row := addVarCoeff row idx (factor * c)
     row := row.set! numVars (target.coeff m)
@@ -982,7 +984,7 @@ private def symmetricPureEquations (target : CMvPolynomial n ℚ)
       | return none
     basisPerms := basisPerms.push p
   for ((i, j), (ri, rj)) in SOS.Symmetry.gramSymmetryConstraints N basisPerms do
-    let mut row : Array ℚ := Array.replicate (numVars + 1) 0
+    let mut row : Array Rat := Array.replicate (numVars + 1) 0
     row := addVarCoeff row (upperTriIndex N i j) 1
     row := addVarCoeff row (upperTriIndex N ri rj) (-1)
     rows := rows.push row
@@ -994,12 +996,12 @@ private def symmetricPureEquations (target : CMvPolynomial n ℚ)
 free columns. -/
 private structure GramParam where
   freeCols : Array Nat
-  constant : Array ℚ
-  coeffs   : Array (Array ℚ)
+  constant : Array Rat
+  coeffs   : Array (Array Rat)
 
-/-- Solve the equality system over `ℚ` and express every Gram entry in
+/-- Solve the equality system over `Rat` and express every Gram entry in
 terms of the remaining free orbit parameters. -/
-private def gramParam (numVars : Nat) (rows : Array (Array ℚ)) :
+private def gramParam (numVars : Nat) (rows : Array (Array Rat)) :
     Option GramParam := Id.run do
   let rows := rows.map fun row => row.set! numVars (-(row[numVars]!))
   let some E := SOS.RatLinAlg.eliminateAll numVars rows | return none
@@ -1007,8 +1009,8 @@ private def gramParam (numVars : Nat) (rows : Array (Array ℚ)) :
   let mut freeIndex : Std.TreeMap Nat Nat compare := {}
   for k in [0:freeCols.size] do
     freeIndex := freeIndex.insert freeCols[k]! k
-  let mut constants : Array ℚ := Array.replicate numVars 0
-  let mut coeffs : Array (Array ℚ) :=
+  let mut constants : Array Rat := Array.replicate numVars 0
+  let mut coeffs : Array (Array Rat) :=
     Array.replicate numVars (Array.replicate freeCols.size 0)
   for k in [0:freeCols.size] do
     let v := freeCols[k]!
@@ -1016,7 +1018,7 @@ private def gramParam (numVars : Nat) (rows : Array (Array ℚ)) :
     coeffs := coeffs.set! v row
   for (pivot, row) in E.assignments do
     constants := constants.set! pivot row[numVars]!
-    let mut cs : Array ℚ := Array.replicate freeCols.size 0
+    let mut cs : Array Rat := Array.replicate freeCols.size 0
     for f in freeCols do
       if let some k := freeIndex[f]? then
         cs := cs.set! k row[f]!
@@ -1026,9 +1028,9 @@ private def gramParam (numVars : Nat) (rows : Array (Array ℚ)) :
 /-- Build the constant Gram matrix and one coefficient matrix per free
 parameter. Matrices are stored in upper-triangle flat order. -/
 private def gramMats (N : Nat) (param : GramParam) :
-    Array (Array ℚ) := Id.run do
+    Array (Array Rat) := Id.run do
   let numVars := upperTriCount N
-  let mut mats : Array (Array ℚ) :=
+  let mut mats : Array (Array Rat) :=
     Array.replicate (param.freeCols.size + 1) (Array.replicate numVars 0)
   for v in [0:numVars] do
     let c := param.constant[v]!
@@ -1041,8 +1043,8 @@ private def gramMats (N : Nat) (param : GramParam) :
         mats := mats.set! (k + 1) ((mats[k + 1]!).set! v a)
   return mats
 
-private def upperTriTrace (N : Nat) (M : Array ℚ) : ℚ := Id.run do
-  let mut t : ℚ := 0
+private def upperTriTrace (N : Nat) (M : Array Rat) : Rat := Id.run do
+  let mut t : Rat := 0
   for i in [0:N] do
     t := t + M[upperTriIndex N i i]!
   return t
@@ -1053,7 +1055,7 @@ dual variable `y`. The objective is a trace extremum in reduced
 coordinates; currently this uses CSDP's dual minimisation direction,
 which is enough to expose rational boundary points in the covered
 `Z₂×Z₂` case. -/
-private def buildReducedProblem (N : Nat) (mats : Array (Array ℚ)) :
+private def buildReducedProblem (N : Nat) (mats : Array (Array Rat)) :
     CSDP.Problem :=
   let freeCount := mats.size - 1
   let aTriples : Array CSDP.ConstraintTriple := Id.run do
@@ -1093,8 +1095,8 @@ private def buildReducedProblem (N : Nat) (mats : Array (Array ℚ)) :
     constantOffset := 0.0 }
 
 /-- Reconstruct a rational Gram matrix from a rounded reduced vector. -/
-private def reconstructReducedGram (N : Nat) (mats : Array (Array ℚ))
-    (vec : Array ℚ) : Option (Array ℚ) := Id.run do
+private def reconstructReducedGram (N : Nat) (mats : Array (Array Rat))
+    (vec : Array Rat) : Option (Array Rat) := Id.run do
   if mats.isEmpty ∨ vec.size + 1 ≠ mats.size then return none
   let numVars := upperTriCount N
   let mut Q := mats[0]!
@@ -1107,10 +1109,10 @@ private def reconstructReducedGram (N : Nat) (mats : Array (Array ℚ))
   return some Q
 
 /-- Try one denominator in the reduced free-parameter space. -/
-private def tryReducedDenominator (block : BlockSpec n) (mats : Array (Array ℚ))
-    (raw : FloatArray) (denom : ℚ) (goal : Goal n) :
+private def tryReducedDenominator (block : BlockSpec n) (mats : Array (Array Rat))
+    (raw : FloatArray) (denom : Rat) (goal : Goal n) :
     Option (Certificate n) := Id.run do
-  let mut vec : Array ℚ := #[]
+  let mut vec : Array Rat := #[]
   for i in [0:raw.size] do
     vec := vec.push (niceRound denom (raw.get! i))
   let some Q := reconstructReducedGram block.size mats vec | return none
@@ -1123,9 +1125,9 @@ private def tryReducedDenominator (block : BlockSpec n) (mats : Array (Array ℚ
   return none
 
 /-- Pure SOS search through the Harrison-style symmetry reduction:
-eliminate coefficient and Gram-symmetry equalities over `ℚ`, solve CSDP
+eliminate coefficient and Gram-symmetry equalities over `Rat`, solve CSDP
 in the free orbit parameters, and round that small vector. -/
-private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
+private def tryReducedPureSdp (target : CMvPolynomial n Rat) (goal : Goal n)
     (useTraceCost : Bool) (extraDeg : Nat) (_strategy : BasisStrategy)
     (maxRoundingDenomLog2 : Nat) (symmetries : Array (Array Nat)) :
     IO (Option (Certificate n)) := do
@@ -1159,9 +1161,9 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
   let sol := CSDP.solve problem
   if sol.ret ∉ [0, 3] then
     return none
-  let targetDenom : ℚ := (polyDenom target : ℚ)
-  let denomCandidates : List ℚ := targetDenom :: niceDenominators
-  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
+  let targetDenom : Rat := (polyDenom target : Rat)
+  let denomCandidates : List Rat := targetDenom :: niceDenominators
+  let maxDenomQ : Rat := (2 ^ maxRoundingDenomLog2 : Rat)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
       if let some cert := tryReducedDenominator block mats sol.y d goal then
@@ -1174,7 +1176,7 @@ private def tryReducedPureSdp (target : CMvPolynomial n ℚ) (goal : Goal n)
 Harrison's `real_positivnullstellensatz_general` (`sos.ml:1018`) builds
 a multi-block free-parameter SDP: one PSD block per Schmüdgen monoid
 element (the σᵢ blocks), polynomial-identity equations eliminated
-over `ℚ` before CSDP runs. The polynomial identity is satisfied *by
+over `Rat` before CSDP runs. The polynomial identity is satisfied *by
 construction*, so CSDP sees a pure PSD problem with no equality
 constraints, and rounding only needs the recovered Gram to stay PSD.
 
@@ -1206,9 +1208,9 @@ where `f_ij = 1` if `i = j` else `2`.
 Returns `(rows, monos)` with `rows : Array (numVars+1)`-arrays
 (last column is the RHS = target's coefficient on that monomial) and
 `monos` the union of monomials touched. -/
-private def multiBlockEquations (target : CMvPolynomial n ℚ)
+private def multiBlockEquations (target : CMvPolynomial n Rat)
     (blocks : Array (BlockSpec n)) :
-    Array (Array ℚ) × Array (CMvMonomial n) := Id.run do
+    Array (Array Rat) × Array (CMvMonomial n) := Id.run do
   let offsets := blockOffsets blocks
   let numVars := totalReducedVars blocks
   let mut monos : Array (CMvMonomial n) := #[]
@@ -1218,14 +1220,14 @@ private def multiBlockEquations (target : CMvPolynomial n ℚ)
       monoIndex := monoIndex.insert m monos.size
       monos := monos.push m
   -- Walk the blocks and accumulate the (b, i, j, support) tuples.
-  let mut cached : Array (Nat × Nat × Nat × Array (CMvMonomial n × ℚ)) := #[]
+  let mut cached : Array (Nat × Nat × Nat × Array (CMvMonomial n × Rat)) := #[]
   for b in [0:blocks.size] do
     let block := blocks[b]!
     let N := block.size
     for i in [0:N] do
       for j in [i:N] do
         let prod := blockProduct block i j
-        let mut support : Array (CMvMonomial n × ℚ) := #[]
+        let mut support : Array (CMvMonomial n × Rat) := #[]
         for m in prod.monomials do
           let c := prod.coeff m
           if c ≠ 0 then
@@ -1234,13 +1236,13 @@ private def multiBlockEquations (target : CMvPolynomial n ℚ)
               monoIndex := monoIndex.insert m monos.size
               monos := monos.push m
         cached := cached.push (b, i, j, support)
-  let mut rows : Array (Array ℚ) := #[]
+  let mut rows : Array (Array Rat) := #[]
   for m in monos do
-    let mut row : Array ℚ := Array.replicate (numVars + 1) 0
+    let mut row : Array Rat := Array.replicate (numVars + 1) 0
     for (b, i, j, support) in cached do
       for (m', c) in support do
         if m' = m then
-          let factor : ℚ := if i = j then 1 else 2
+          let factor : Rat := if i = j then 1 else 2
           let blockN := blocks[b]!.size
           let idx := offsets[b]! + upperTriIndex blockN i j
           row := addVarCoeff row idx (factor * c)
@@ -1249,20 +1251,20 @@ private def multiBlockEquations (target : CMvPolynomial n ℚ)
   return (rows, monos)
 
 /-- Build the per-block reduced Gram matrices from a multi-block
-`GramParam`. Returns an `Array (Array (Array ℚ))` indexed as
+`GramParam`. Returns an `Array (Array (Array Rat))` indexed as
 `mats[k][b]`: the `k`-th matrix in the SDP encoding (`k = 0` is the
 particular solution, `k ≥ 1` are the null-space basis vectors), and
 within each, `b` indexes the block. Each `mats[k][b]` is upper-triangle
 packed of size `upperTriCount(blocks[b].size)`. -/
 private def multiBlockGramMats (blocks : Array (BlockSpec n)) (param : GramParam) :
-    Array (Array (Array ℚ)) := Id.run do
+    Array (Array (Array Rat)) := Id.run do
   let offsets := blockOffsets blocks
   let nBlocks := blocks.size
   let blockSizes : Array Nat := blocks.map (fun b => upperTriCount b.size)
   -- For each free-col index k (or k=0 for constant), build per-block
   -- matrix of zeros and fill in.
-  let mkPerBlock : Array (Array ℚ) := blockSizes.map (Array.replicate · 0)
-  let mut mats : Array (Array (Array ℚ)) :=
+  let mkPerBlock : Array (Array Rat) := blockSizes.map (Array.replicate · 0)
+  let mut mats : Array (Array (Array Rat)) :=
     Array.replicate (param.freeCols.size + 1) mkPerBlock
   for b in [0:nBlocks] do
     let blockN := blocks[b]!.size
@@ -1285,7 +1287,7 @@ private def multiBlockGramMats (blocks : Array (BlockSpec n)) (param : GramParam
 
 /-- CSDP encoding of the reduced multi-block dual. -/
 private def buildMultiBlockReducedProblem (blocks : Array (BlockSpec n))
-    (mats : Array (Array (Array ℚ))) : CSDP.Problem :=
+    (mats : Array (Array (Array Rat))) : CSDP.Problem :=
   let freeCount := mats.size - 1
   let nBlocks := blocks.size
   let aTriples : Array CSDP.ConstraintTriple := Id.run do
@@ -1326,7 +1328,7 @@ private def buildMultiBlockReducedProblem (blocks : Array (BlockSpec n))
     let mut out : Array Float := #[]
     for k in [0:freeCount] do
       let perBlock := mats[k + 1]!
-      let mut t : ℚ := 0
+      let mut t : Rat := 0
       for b in [0:nBlocks] do
         t := t + upperTriTrace (blocks[b]!.size) (perBlock[b]!)
       out := out.push (ratToFloat t)
@@ -1340,11 +1342,11 @@ private def buildMultiBlockReducedProblem (blocks : Array (BlockSpec n))
 reduced vector in the multi-block encoding. Returns `none` on shape
 mismatch. -/
 private def multiBlockReconstructGram (blocks : Array (BlockSpec n))
-    (mats : Array (Array (Array ℚ))) (vec : Array ℚ) :
-    Option (Array (Array ℚ)) := Id.run do
+    (mats : Array (Array (Array Rat))) (vec : Array Rat) :
+    Option (Array (Array Rat)) := Id.run do
   if mats.isEmpty ∨ vec.size + 1 ≠ mats.size then return none
   let nBlocks := blocks.size
-  let mut Qs : Array (Array ℚ) := (mats[0]!).map id
+  let mut Qs : Array (Array Rat) := (mats[0]!).map id
   for k in [0:vec.size] do
     let perBlock := mats[k + 1]!
     for b in [0:nBlocks] do
@@ -1438,21 +1440,21 @@ private def jacobiEigen (a0 : Array (Array Float)) :
 /-- Rationalise a float vector: divide by its largest-magnitude entry (so
 the dominant entry becomes ±1), then round each entry to the grid `1/d`.
 Returns the cleared rational vector. -/
-private def rationaliseVec (denom : ℚ) (u : Array Float) : Array ℚ := Id.run do
+private def rationaliseVec (denom : Rat) (u : Array Float) : Array Rat := Id.run do
   let mut mx : Float := 0.0
   for x in u do
     if x.abs > mx then mx := x.abs
-  if mx ≤ 1e-300 then return u.map (fun _ => (0 : ℚ))
-  let mut out : Array ℚ := #[]
+  if mx ≤ 1e-300 then return u.map (fun _ => (0 : Rat))
+  let mut out : Array Rat := #[]
   for x in u do
     out := out.push (niceRound denom (x / mx))
   return out
 
 /-- Apply a dense symmetric `N×N` rational matrix (from upper-tri packing)
 to a rational vector `u`, returning `M·u`. -/
-private def upperTriApply (N : Nat) (packed : Array ℚ) (u : Array ℚ) : Array ℚ :=
+private def upperTriApply (N : Nat) (packed : Array Rat) (u : Array Rat) : Array Rat :=
   Id.run do
-    let mut out : Array ℚ := Array.replicate N 0
+    let mut out : Array Rat := Array.replicate N 0
     for v in [0:packed.size] do
       let (i, j) := upperTriPair N v
       let x := packed[v]!
@@ -1468,8 +1470,8 @@ estimate each block's numerical null space, rationalise it, impose
 selects eigenvalues below `relTol · maxᵢ|λᵢ|`. Returns `none` if no rational
 null space is found or the recovered Gram fails to check. -/
 private def tryFacialRecovery (blocks : Array (BlockSpec n))
-    (mats : Array (Array (Array ℚ))) (rawY : FloatArray)
-    (goal : Goal n) (gs : List (CMvPolynomial n ℚ)) (gIdxs : Array (List Nat)) :
+    (mats : Array (Array (Array Rat))) (rawY : FloatArray)
+    (goal : Goal n) (gs : List (CMvPolynomial n Rat)) (gIdxs : Array (List Nat)) :
     Option (Certificate n) := Id.run do
   let m := mats.size - 1            -- number of free variables
   if rawY.size ≠ m then return none
@@ -1518,8 +1520,8 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
       out := out.push P
     return out
   -- Try a ladder of rationalisation denominators for the projector columns.
-  for denom in ([1, 2, 3, 4, 6, 8, 12, 16, 24, 48] : List ℚ) do
-    let mut rows : Array (Array ℚ) := #[]
+  for denom in ([1, 2, 3, 4, 6, 8, 12, 16, 24, 48] : List Rat) do
+    let mut rows : Array (Array Rat) := #[]
     let mut anyNull := false
     for b in [0:blocks.size] do
       let N := blocks[b]!.size
@@ -1531,7 +1533,7 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
       -- columns can render the exact system spuriously infeasible. Each
       -- candidate is augmented with a zero RHS so `rref` row-reduces the
       -- homogeneous span.
-      let mut candidates : Array (Array ℚ) := #[]
+      let mut candidates : Array (Array Rat) := #[]
       for jcol in [0:N] do
         let mut col : Array Float := #[]
         let mut cmax : Float := 0.0
@@ -1549,11 +1551,11 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
         -- column carries `(M₀·ur)[i]` un-negated (the `gramParam` caller
         -- flips sign because its rows use the opposite convention).
         let m0u := upperTriApply N ((mats[0]!)[b]!) ur
-        let mut cols : Array (Array ℚ) := #[]
+        let mut cols : Array (Array Rat) := #[]
         for t in [0:m] do
           cols := cols.push (upperTriApply N ((mats[t+1]!)[b]!) ur)
         for i in [0:N] do
-          let mut row : Array ℚ := Array.replicate (m + 1) 0
+          let mut row : Array Rat := Array.replicate (m + 1) 0
           for t in [0:m] do
             row := row.set! t ((cols[t]!)[i]!)
           row := row.set! m (m0u[i]!)
@@ -1567,7 +1569,7 @@ private def tryFacialRecovery (blocks : Array (BlockSpec n))
         -- CSDP's (PSD) interior would pass. Set the free coordinates from
         -- `rawY`, then back-substitute each assignment
         -- `y[v] = expr[m] + Σ_free expr[f]·y[f]`.
-        let mut y : Array ℚ := Array.replicate m 0
+        let mut y : Array Rat := Array.replicate m 0
         for f in elim.freeCols do
           y := y.set! f (niceRound denom (rawY.get! f))
         for (v, expr) in elim.assignments do
@@ -1594,10 +1596,10 @@ and keep the certificate iff it checks. Returns `none` on any failure
 (reconstruction shape mismatch, non-PSD block, or a failed
 polynomial-identity check). -/
 private def tryReducedSchmudgenDenominator (blocks : Array (BlockSpec n))
-    (mats : Array (Array (Array ℚ))) (raw : FloatArray) (denom : ℚ)
-    (goal : Goal n) (gs : List (CMvPolynomial n ℚ)) (gIdxs : Array (List Nat)) :
+    (mats : Array (Array (Array Rat))) (raw : FloatArray) (denom : Rat)
+    (goal : Goal n) (gs : List (CMvPolynomial n Rat)) (gIdxs : Array (List Nat)) :
     Option (Certificate n) := Id.run do
-  let mut vec : Array ℚ := #[]
+  let mut vec : Array Rat := #[]
   for i in [0:raw.size] do
     vec := vec.push (niceRound denom (raw.get! i))
   let some Qs := multiBlockReconstructGram blocks mats vec
@@ -1613,14 +1615,14 @@ private def tryReducedSchmudgenDenominator (blocks : Array (BlockSpec n))
   if cert.checks goal gs [] then return some cert
   return none
 
-private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (goal : Goal n)
+private def tryReducedSchmudgenSdp (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (goal : Goal n)
     (useTraceCost : Bool) (extraDeg : Nat) (strategy : BasisStrategy)
     (maxRoundingDenomLog2 : Nat)
     (maxSubsetCardinality : Nat) :
     IO (Option (Certificate n)) := do
   -- Cap on `numVars = Σ_b upperTriCount(blockᵦ.size)` for the reduced
-  -- ℚ Gauss-Jordan in `gramParam`; above this the exact-rational
+  -- Rat Gauss-Jordan in `gramParam`; above this the exact-rational
   -- elimination gets expensive, so the path bails and the outer loop
   -- moves on. BBR's reduced problem has `numVars = 237`, well under cap.
   let maxReducedSchmudgenVars : Nat := 2500
@@ -1649,19 +1651,19 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
   -- scaling so the max |entry| across ALL mats lands near `2^20`.
   -- Uniform scaling preserves the feasible set and the argmin, so the
   -- recovered y* is the original problem's solution unchanged.
-  let maxEntry : ℚ := Id.run do
-    let mut m : ℚ := 1
+  let maxEntry : Rat := Id.run do
+    let mut m : Rat := 1
     for k in [0:mats.size] do
       for b in [0:blocks.size] do
         let M := (mats[k]!)[b]!
         for v in [0:M.size] do
-          let entry : ℚ := M[v]!
-          let a : ℚ := if entry < 0 then -entry else entry
+          let entry : Rat := M[v]!
+          let a : Rat := if entry < 0 then -entry else entry
           if a > m then m := a
     return m
-  let twoTo20Q : ℚ := 1048576
-  let scaleQ : ℚ := if maxEntry > twoTo20Q then twoTo20Q / maxEntry else 1
-  let matsScaled : Array (Array (Array ℚ)) :=
+  let twoTo20Q : Rat := 1048576
+  let scaleQ : Rat := if maxEntry > twoTo20Q then twoTo20Q / maxEntry else 1
+  let matsScaled : Array (Array (Array Rat)) :=
     mats.map (fun perBlock => perBlock.map (fun M => M.map (· * scaleQ)))
   let problem := buildMultiBlockReducedProblem blocks matsScaled
   -- Scale the objective vector so its max |entry| lands near `2^20`.
@@ -1680,12 +1682,12 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
   -- on every entry), which preserves the feasible set and the argmin, so
   -- the dual `sol.y` is already the original problem's solution — no
   -- inverse scaling on `y` is needed.
-  let targetDenom : ℚ := (polyDenom target : ℚ)
-  let constraintDenoms : List ℚ := gs.map fun g => (polyDenom g : ℚ)
-  let crossDenoms : List ℚ := gs.map fun g => (polyDenom (target * g) : ℚ)
-  let denomCandidates : List ℚ :=
+  let targetDenom : Rat := (polyDenom target : Rat)
+  let constraintDenoms : List Rat := gs.map fun g => (polyDenom g : Rat)
+  let crossDenoms : List Rat := gs.map fun g => (polyDenom (target * g) : Rat)
+  let denomCandidates : List Rat :=
     targetDenom :: constraintDenoms ++ crossDenoms ++ niceDenominators
-  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
+  let maxDenomQ : Rat := (2 ^ maxRoundingDenomLog2 : Rat)
   let gIdxs : Array (List Nat) := blocks.map (fun b => b.idxs)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
@@ -1701,7 +1703,7 @@ private def tryReducedSchmudgenSdp (target : CMvPolynomial n ℚ)
 
 /-- Constant SOS multiplier from a non-negative rational, represented
 as a single weighted-square term `r · 1²`. -/
-private def constTermDecomp? (r : ℚ) : Option (SOSDecomp n) :=
+private def constTermDecomp? (r : Rat) : Option (SOSDecomp n) :=
   if r < 0 then none
   else some { terms := [(r, CMvPolynomial.C 1)] }
 
@@ -1709,15 +1711,15 @@ private def constTermDecomp? (r : ℚ) : Option (SOSDecomp n) :=
 multipliers over the enumerated Schmüdgen products. This catches the
 small div/mod refutations after equality elimination without asking CSDP
 to recover a rank-zero/constant Gram solution numerically. -/
-private def tryConstantProductCertificate (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+private def tryConstantProductCertificate (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (goal : Goal n) (extraDeg : Nat) (maxSubsetCardinality : Nat) :
     Option (Certificate n) := Id.run do
   if !ps.isEmpty then return none
   let targetDeg := target.totalDegree
   let maxGDeg := gs.foldl (fun acc g => Nat.max acc g.totalDegree) 0
   let σ₀Deg := Nat.max targetDeg maxGDeg
-  let products : Array (List Nat × CMvPolynomial n ℚ) :=
+  let products : Array (List Nat × CMvPolynomial n Rat) :=
     #[([], CMvPolynomial.C 1)] ++
       enumerateConstraintProducts (σ₀Deg + 2 * extraDeg)
         maxSubsetCardinality gs.toArray
@@ -1726,10 +1728,10 @@ private def tryConstantProductCertificate (target : CMvPolynomial n ℚ)
     for m in prod.monomials do
       if !monos.contains m then
         monos := monos.push m
-  let mut A : Array (Array ℚ) := Array.mkEmpty monos.size
-  let mut b : Array ℚ := Array.mkEmpty monos.size
+  let mut A : Array (Array Rat) := Array.mkEmpty monos.size
+  let mut b : Array Rat := Array.mkEmpty monos.size
   for m in monos do
-    let mut row : Array ℚ := Array.mkEmpty products.size
+    let mut row : Array Rat := Array.mkEmpty products.size
     for (_, prod) in products do
       row := row.push (prod.coeff m)
     A := A.push row
@@ -1753,8 +1755,8 @@ are filtered against the cap `2 ^ maxRoundingDenomLog2` (default
 exponent `66`); lower the tactic-surface `Config.maxRoundingDenomLog2`
 field to fail faster on targets you know won't round cleanly. Returns
 `none` if CSDP fails or no rounding validates. -/
-private def tryOneSdp (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+private def tryOneSdp (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (goal : Goal n) (useTraceCost : Bool) (extraDeg : Nat)
     (strategy : BasisStrategy := .dense)
     (maxRoundingDenomLog2 : Nat := 66)
@@ -1779,19 +1781,19 @@ private def tryOneSdp (target : CMvPolynomial n ℚ)
   if sol.ret ∉ [0, 3] then
     return none
   let sol := unscaleSolution sol xShift
-  let targetDenom : ℚ := (polyDenom target : ℚ)
-  let constraintDenoms : List ℚ := gs.map fun g => (polyDenom g : ℚ)
-  let equalityDenoms : List ℚ := ps.map fun p => (polyDenom p : ℚ)
+  let targetDenom : Rat := (polyDenom target : Rat)
+  let constraintDenoms : List Rat := gs.map fun g => (polyDenom g : Rat)
+  let equalityDenoms : List Rat := ps.map fun p => (polyDenom p : Rat)
   -- Heuristic extra candidates: the σᵢ-block Gram for constraint `gᵢ`
   -- often needs a denominator divisible by factors from both `target`
   -- and `gᵢ`. `polyDenom (target * gᵢ)` is a cheap shot at that grid
   -- (not a guaranteed superset of the true Gram denom — but often
   -- closer than either input alone).
-  let crossDenoms : List ℚ := gs.map fun g => (polyDenom (target * g) : ℚ)
-  let denomCandidates : List ℚ :=
+  let crossDenoms : List Rat := gs.map fun g => (polyDenom (target * g) : Rat)
+  let denomCandidates : List Rat :=
     targetDenom :: constraintDenoms ++ crossDenoms ++ equalityDenoms
       ++ niceDenominators
-  let maxDenomQ : ℚ := (2 ^ maxRoundingDenomLog2 : ℚ)
+  let maxDenomQ : Rat := (2 ^ maxRoundingDenomLog2 : Rat)
   for d in denomCandidates do
     if d ≤ maxDenomQ then
       if let some cert := tryDenominator gs ps blocks eqSpecs sol d goal then
@@ -1804,7 +1806,7 @@ This is Harrison's `PURE_SOS` shape: with no inequality/equality
 hypotheses, solve the single `σ₀` SDP directly in pure-feasibility mode.
 That avoids the general search's trace-cost attempt and multiplier/product
 setup while still using the configured σ₀ basis strategy. -/
-private def tryDirectSos (target : CMvPolynomial n ℚ)
+private def tryDirectSos (target : CMvPolynomial n Rat)
     (goal : Goal n) (basisStrategy : BasisStrategy := .newton)
     (maxRoundingDenomLog2 : Nat := 66) : IO (Option (Certificate n)) :=
   tryOneSdp target [] [] goal (useTraceCost := false) (extraDeg := 0)
@@ -1826,8 +1828,8 @@ is `(maxDepth+1) × strategies` CSDP solves. Opt in per call via
 `maxRoundingDenomLog2` caps the denominator schedule at
 `2 ^ maxRoundingDenomLog2` (default exponent `66`). Same config struct
 on the tactic side. -/
-private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+private def runFeasibilitySearchCore (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (goal : Goal n) (maxRoundingDenomLog2 : Nat := 66)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
@@ -1862,7 +1864,7 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
   let useReducedPure := gs.isEmpty ∧ ps.isEmpty ∧ symmetries.size > 1
   -- The closed strict-refutation (`refutation = true`, set only by
   -- `runClosedRefutation`) routes to the multi-block reduced Schmüdgen
-  -- encoder: it eliminates the polynomial-identity equations over ℚ
+  -- encoder: it eliminates the polynomial-identity equations over Rat
   -- before CSDP, so CSDP sees a pure-PSD problem with no equality
   -- constraints — far better conditioned than dense `tryOneSdp` at the
   -- large coefficient scale of a refutation like BBR Lemma 7.2 (where
@@ -1935,8 +1937,8 @@ private def runFeasibilitySearchCore (target : CMvPolynomial n ℚ)
 pre-pass. When an equality can solve for a variable, the SDP is run on the
 substituted system and the resulting certificate is lifted back over the
 original equality list before returning. -/
-def runFeasibilitySearch (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+def runFeasibilitySearch (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (goal : Goal n) (maxRoundingDenomLog2 : Nat := 66)
     (maxDepth : Nat := 0) (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) (refutation : Bool := false) :
@@ -1969,7 +1971,7 @@ witnesses for `p − ε`, so a clean re-solve is more robust. -/
 /-- Strict-positivity certificate output bundle. -/
 structure StrictResult (n : Nat) where
   cert : Certificate n
-  ε    : ℚ
+  ε    : Rat
   hε   : 0 < ε
 
 /-- Read `λ*` from the LP-slack solve. The λ block is a 1×1 PSD block,
@@ -1985,10 +1987,10 @@ private def readLambda (sol : CSDP.Solution) (lambdaBlockIdx : Nat) :
 
 /-- Return the affine coefficient vector and constant term of `p`, or
 `none` if `p` has a monomial of degree at least two. -/
-private def affineCoeffs? (p : CMvPolynomial n ℚ) :
-    Option (Array ℚ × ℚ) := Id.run do
-  let mut coeffs : Array ℚ := Array.replicate n 0
-  let mut const : ℚ := 0
+private def affineCoeffs? (p : CMvPolynomial n Rat) :
+    Option (Array Rat × Rat) := Id.run do
+  let mut coeffs : Array Rat := Array.replicate n 0
+  let mut const : Rat := 0
   for m in p.monomials do
     let c := p.coeff m
     let mut deg : Nat := 0
@@ -2011,14 +2013,14 @@ private def affineCoeffs? (p : CMvPolynomial n ℚ) :
 
 `p - ε = μ + Σᵢ λᵢ gᵢ`, with `μ, λᵢ ≥ 0`,
 
-as an equality LP over `ℚ`. This covers linear strict-strict cases
+as an equality LP over `Rat`. This covers linear strict-strict cases
 without entering CSDP. -/
-private def tryAffineStrict (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ))
+private def tryAffineStrict (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat))
     (maxRoundingDenomLog2 : Nat) : Option (StrictResult n) := Id.run do
   if !ps.isEmpty then return none
   let some (pCoeffs, pConst) := affineCoeffs? p | return none
-  let mut gData : Array (Array ℚ × ℚ) := Array.mkEmpty gs.length
+  let mut gData : Array (Array Rat × Rat) := Array.mkEmpty gs.length
   for g in gs do
     let some data := affineCoeffs? g | return none
     gData := gData.push data
@@ -2031,19 +2033,19 @@ private def tryAffineStrict (p : CMvPolynomial n ℚ)
   for k in [4:21] do
     let denom : Nat := 2 ^ k
     if maxRoundingDenomLog2 < k then continue
-    let ε : ℚ := 1 / (denom : ℚ)
+    let ε : Rat := 1 / (denom : Rat)
     if hε : 0 < ε then
       let nVars := gs.length + 1
-      let mut A : Array (Array ℚ) := Array.mkEmpty (n + 1)
-      let mut b : Array ℚ := Array.mkEmpty (n + 1)
-      let mut constRow : Array ℚ := Array.mkEmpty nVars
+      let mut A : Array (Array Rat) := Array.mkEmpty (n + 1)
+      let mut b : Array Rat := Array.mkEmpty (n + 1)
+      let mut constRow : Array Rat := Array.mkEmpty nVars
       for i in [0:gs.length] do
         constRow := constRow.push (gData[i]!.2)
       constRow := constRow.push 1
       A := A.push constRow
       b := b.push (pConst - ε)
       for j in [0:n] do
-        let mut row : Array ℚ := Array.mkEmpty nVars
+        let mut row : Array Rat := Array.mkEmpty nVars
         for i in [0:gs.length] do
           row := row.push (gData[i]!.1[j]!)
         row := row.push 0
@@ -2073,8 +2075,8 @@ on `λ*` accounts for CSDP imprecision — when `λ*` is reported just
 below a clean power of two, we still try the natural largest `ε`.
 Returns `none` if CSDP fails, `λ* ≤ 1e-9`, or no candidate ε in the
 window admits a verifiable certificate. -/
-private def runStrictCore (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+private def runStrictCore (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat) := [])
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
@@ -2128,7 +2130,7 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
     -- relaxation as the LP-slack solve that produced `λ*`.
     for j in [0:8] do
       let denom : Nat := 2 ^ (k + j)
-      let ε : ℚ := 1 / (denom : ℚ)
+      let ε : Rat := 1 / (denom : Rat)
       if hε : 0 < ε then
         let goal : Goal n := .strict p ε hε
         let targetPoly := p - CMvPolynomial.C ε
@@ -2141,8 +2143,8 @@ private def runStrictCore (p : CMvPolynomial n ℚ)
 
 /-- Strict-positivity search with equality elimination before both the LP-slack
 probe and the final feasibility reconstruction. -/
-def runStrict (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+def runStrict (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat) := [])
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
@@ -2172,7 +2174,7 @@ list `gs ++ [−p]`, then derive `pol^i > 0` from repeated `mul_pos`
 applied to the strict hypotheses. Under the contrapositive `p ≤ 0`,
 the augmented list is all ≥ 0, the cert forces `pol^i ≤ 0`, and we
 contradict the structural strict-positivity. See
-`sos_strict_product_sound` in `SOS.Verifier`.
+`sos_strict_product_sound` in `SOS.Mathlib.Verifier`.
 
 The motivating example is `sos.ml:1657`:
 `x > 1 ∧ y > 1 ⇒ x · y > x + y − 1`, tight at `(1,1)`. `runStrict`'s
@@ -2184,7 +2186,7 @@ the *polynomial values* of the strict-hypothesis inequalities (already
 in canonical `0 < g` form), and `exponent` is the `i` in `pol^i`. -/
 structure StrictProductResult (n : Nat) where
   cert      : Certificate n
-  strictGs  : List (CMvPolynomial n ℚ)
+  strictGs  : List (CMvPolynomial n Rat)
   exponent  : Nat
 
 /-- Strict-positivity search via strict-product Positivstellensatz.
@@ -2196,16 +2198,16 @@ augmented inequality list `gs ++ [−p]`, so this path benefits from all
 the rounding / basis-pruning / preordering work already in
 `runFeasibilitySearch`. Returns `none` if no exponent in the budget
 produces a verifiable closed cert. -/
-def runStrictProduct (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ))
-    (strictIdxs : List Nat) (ps : List (CMvPolynomial n ℚ) := [])
+def runStrictProduct (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat))
+    (strictIdxs : List Nat) (ps : List (CMvPolynomial n Rat) := [])
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
     IO (Option (StrictProductResult n)) := do
   -- No strict hypotheses ⇒ no structural strict-positivity witness; bail.
   if strictIdxs.isEmpty then return none
-  let strictGs : List (CMvPolynomial n ℚ) :=
+  let strictGs : List (CMvPolynomial n Rat) :=
     strictIdxs.map (fun i => gs.getD i 0)
   let pol := strictProductPoly strictGs
   let polDeg := pol.totalDegree
@@ -2257,8 +2259,8 @@ Soundness is `sos_strict_product_sound` with `strictGs = []`, `exponent = 1`
 (`−(strictProductPoly [])¹ = −1`); the empty `strictGs` makes its
 strict-positivity hypothesis vacuous, so it yields `0 < aeval φ p`
 unconditionally (given `gs ≥ 0`, `ps = 0`). -/
-def runClosedRefutation (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+def runClosedRefutation (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat) := [])
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :
@@ -2271,7 +2273,7 @@ def runClosedRefutation (p : CMvPolynomial n ℚ)
   let augGs := gs ++ [-p]
   -- Target `−(strictProductPoly [])^1 = −(1)^1 = −1`, written in the exact
   -- form `sos_strict_product_sound` expects for `strictGs = []`, `exp = 1`.
-  let target : CMvPolynomial n ℚ := -(strictProductPoly [] ^ 1)
+  let target : CMvPolynomial n Rat := -(strictProductPoly [] ^ 1)
   let goal : Goal n := .closed target
   runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
     (maxDepth := maxDepth) (basisStrategy := basisStrategy)
@@ -2299,8 +2301,8 @@ into per call via `sos (config := { maxRefutationPower := k })`.
 Equality hypotheses are rejected up front for the same reason as
 `runClosedRefutation`: the reduced refutation encoder does not thread
 equality cofactors. -/
-def runNonnegRefutation (p : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ) := [])
+def runNonnegRefutation (p : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat) := [])
     (maxPower : Nat := 0)
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
@@ -2309,7 +2311,7 @@ def runNonnegRefutation (p : CMvPolynomial n ℚ)
   if !ps.isEmpty then return none
   let augGs := gs ++ [-p]
   for i in [1:maxPower + 1] do
-    let target : CMvPolynomial n ℚ := -((-p) ^ i)
+    let target : CMvPolynomial n Rat := -((-p) ^ i)
     let goal : Goal n := .closed target
     match (← runFeasibilitySearch target augGs ps goal maxRoundingDenomLog2
         (maxDepth := maxDepth) (basisStrategy := basisStrategy)
@@ -2323,8 +2325,8 @@ translation (`p` for `.closed`, `-1` for `.infeasible`). Strict
 positivity has its own entry point: `runStrict`; the `.strict` arm
 here is a defensive `none` for direct callers (the tactic surface
 routes `.strict` goals straight to `runStrict`). -/
-def runSearch (goal : Goal n) (gs : List (CMvPolynomial n ℚ))
-    (ps : List (CMvPolynomial n ℚ) := [])
+def runSearch (goal : Goal n) (gs : List (CMvPolynomial n Rat))
+    (ps : List (CMvPolynomial n Rat) := [])
     (maxRoundingDenomLog2 : Nat := 66) (maxDepth : Nat := 0)
     (basisStrategy : BasisStrategy := .newton)
     (maxSubsetCardinality : Nat := 1) :

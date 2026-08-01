@@ -12,7 +12,7 @@ permutation group of the problem and the resulting equality
 constraints on `Q` for CSDP to enforce, following Harrison's
 `sumofsquares_general_symmetry` (`sos.ml:1487`).
 -/
-import SOS.HexMvPolyCompat
+import SOS.Polynomial
 import Std.Data.TreeMap
 
 namespace SOS.Symmetry
@@ -69,9 +69,9 @@ def permuteMono (perm : Array Nat) (m : CMvMonomial n) : CMvMonomial n :=
 /-- Apply a variable permutation to a polynomial: `(π · p)(X) = p(X_π)`.
 The new polynomial has, for each support monomial `m` of `p`, the
 coefficient of `m` moved onto `permuteMono perm m`. -/
-def applyVarPerm (perm : Array Nat) (p : CMvPolynomial n ℚ) :
-    CMvPolynomial n ℚ := Id.run do
-  let mut acc : CMvPolynomial n ℚ := 0
+def applyVarPerm (perm : Array Nat) (p : CMvPolynomial n Rat) :
+    CMvPolynomial n Rat := Id.run do
+  let mut acc : CMvPolynomial n Rat := 0
   for m in p.monomials do
     let c := p.coeff m
     if c ≠ 0 then
@@ -82,8 +82,8 @@ def applyVarPerm (perm : Array Nat) (p : CMvPolynomial n ℚ) :
 `target = σ₀ + Σ σᵢ·gᵢ + Σ qⱼ·pⱼ`: permutations of `Fin n` that fix
 `target`, every `gᵢ`, and every `pⱼ` simultaneously. Identity is
 always included. -/
-def detectSymmetries (target : CMvPolynomial n ℚ)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
+def detectSymmetries (target : CMvPolynomial n Rat)
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat)) :
     Array (Array Nat) := Id.run do
   let mut out : Array (Array Nat) := #[]
   for π in allPermutations n do

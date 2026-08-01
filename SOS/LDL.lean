@@ -33,20 +33,20 @@ symmetric matrix. -/
 
 /-- Read entry `(i, j)` from a symmetric matrix stored as upper-triangle.
 The caller may pass `i > j`; we transpose. -/
-@[inline] def readSym (n : Nat) (Q : Array ℚ) (i j : Nat) : ℚ :=
+@[inline] def readSym (n : Nat) (Q : Array Rat) (i j : Nat) : Rat :=
   if i ≤ j then Q[upperIdx n i j]! else Q[upperIdx n j i]!
 
 /-- Result of LDLᵀ: `L` (n×n lower-unit-triangular, row-major dense) and
 `D` (length-n diagonal). -/
 structure LDLT where
   n : Nat
-  L : Array ℚ
-  D : Array ℚ
+  L : Array Rat
+  D : Array Rat
   deriving Inhabited, Repr
 
 namespace LDLT
 
-@[inline] def get (ldl : LDLT) (i j : Nat) : ℚ := ldl.L[i * ldl.n + j]!
+@[inline] def get (ldl : LDLT) (i j : Nat) : Rat := ldl.L[i * ldl.n + j]!
 
 end LDLT
 
@@ -60,12 +60,12 @@ whose Gram lies on the boundary of the PSD cone (e.g. the unique SOS
 Gram of `(x + y)²`). When `D[j] = 0` we set `L[i, j] := 0` for
 `i > j`; `LDL.reconstruct` and `transposeMulBasis` already drop
 zero-`D` and zero-`L` contributions. -/
-def decompose (n : Nat) (Q : Array ℚ) : Option LDLT := Id.run do
+def decompose (n : Nat) (Q : Array Rat) : Option LDLT := Id.run do
   if Q.size ≠ upperSize n then return none
-  let mut L : Array ℚ := Array.replicate (n * n) 0
-  let mut D : Array ℚ := Array.replicate n 0
+  let mut L : Array Rat := Array.replicate (n * n) 0
+  let mut D : Array Rat := Array.replicate n 0
   for j in [0:n] do
-    let mut djAcc : ℚ := readSym n Q j j
+    let mut djAcc : Rat := readSym n Q j j
     for k in [0:j] do
       let ljk := L[j * n + k]!
       djAcc := djAcc - D[k]! * ljk * ljk
@@ -77,13 +77,13 @@ def decompose (n : Nat) (Q : Array ℚ) : Option LDLT := Id.run do
       -- residual column for this `j` is also zero. Check; reject if
       -- any residual is non-zero, otherwise leave `L[i, j] = 0`.
       for i in [j+1:n] do
-        let mut numer : ℚ := readSym n Q i j
+        let mut numer : Rat := readSym n Q i j
         for k in [0:j] do
           numer := numer - D[k]! * L[i * n + k]! * L[j * n + k]!
         if numer ≠ 0 then return none
     else
       for i in [j+1:n] do
-        let mut numer : ℚ := readSym n Q i j
+        let mut numer : Rat := readSym n Q i j
         for k in [0:j] do
           numer := numer - D[k]! * L[i * n + k]! * L[j * n + k]!
         L := L.set! (i * n + j) (numer / djAcc)
@@ -94,13 +94,13 @@ def decompose (n : Nat) (Q : Array ℚ) : Option LDLT := Id.run do
 /-- Compute `Lᵀ · z`. The result has length `ldl.n`; element `i` is
 `Σ_k L[k,i] · z[k]`. -/
 def transposeMulBasis {nVar : Nat} (ldl : LDLT)
-    (basis : Array (CMvPolynomial nVar ℚ)) :
-    Option (Array (CMvPolynomial nVar ℚ)) := Id.run do
+    (basis : Array (CMvPolynomial nVar Rat)) :
+    Option (Array (CMvPolynomial nVar Rat)) := Id.run do
   let n := ldl.n
   if basis.size ≠ n then return none
-  let mut w : Array (CMvPolynomial nVar ℚ) := Array.mkEmpty n
+  let mut w : Array (CMvPolynomial nVar Rat) := Array.mkEmpty n
   for i in [0:n] do
-    let mut acc : CMvPolynomial nVar ℚ := CMvPolynomial.C 0
+    let mut acc : CMvPolynomial nVar Rat := CMvPolynomial.C 0
     for k in [0:n] do
       let lki := ldl.get k i
       if lki ≠ 0 then
@@ -114,14 +114,14 @@ produce a list of weighted-square terms `(Dᵢ, wᵢ)` representing
 `Σᵢ Dᵢ · wᵢ²ᵢ` where `D` is LDLᵀ's diagonal and `w = Lᵀ · z`. Pivots
 satisfy `Dᵢ ≥ 0` by `decompose`'s precondition; zero pivots are
 dropped. -/
-def reconstruct {nVar : Nat} (n : Nat) (Q : Array ℚ)
-    (basis : Array (CMvPolynomial nVar ℚ)) :
-    Option (List (ℚ × CMvPolynomial nVar ℚ)) := Id.run do
+def reconstruct {nVar : Nat} (n : Nat) (Q : Array Rat)
+    (basis : Array (CMvPolynomial nVar Rat)) :
+    Option (List (Rat × CMvPolynomial nVar Rat)) := Id.run do
   if Q.size ≠ upperSize n then return none
   if basis.size ≠ n then return none
   let some ldl := decompose n Q | return none
   let some w := transposeMulBasis ldl basis | return none
-  let mut acc : Array (ℚ × CMvPolynomial nVar ℚ) := #[]
+  let mut acc : Array (Rat × CMvPolynomial nVar Rat) := #[]
   for i in [0:n] do
     let Di := ldl.D[i]!
     let some wi := w[i]? | return none

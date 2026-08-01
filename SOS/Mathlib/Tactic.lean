@@ -20,27 +20,6 @@ namespace SOS
 
 open Lean Elab Tactic Meta
 
-/- Per-call configuration for the `sos` / `sos?` tactics. Pass as
-`sos (config := { maxDepth := 3 })` or omit the clause to use defaults.
-
-* `maxDepth` — iterative-deepening cap. At each `extraDeg ∈ [0..maxDepth]`
-  the σ₀ and σᵢ bases grow by one monomial degree. Harrison's `REAL_SOS`
-  reports needing depth up to 12; each level is a fresh CSDP solve and
-  scales combinatorially with the basis. The default is chosen
-  empirically against `SOSTest` — at the time of writing, `1` is the
-  largest value with no measurable wall-clock cost over `0`, and the
-  depth-1 retry unlocks the discriminant identity among others. Raise
-  per-call for hard targets.
-* `maxRoundingDenomLog2` — base-2 log of the cap on rounding-denominator
-  candidates in the engine schedule. The cap is
-  `2 ^ maxRoundingDenomLog2`; the default exponent `66` is Harrison's
-  `find_rounding` ceiling. Lower it to fail faster on goals you know
-  won't round cleanly (e.g. `{ maxRoundingDenomLog2 := 40 }`).
-* `basisStrategy` — σ₀ basis pruning. `.newton` (default) uses
-  Reznick's half-Newton-polytope test via an exact-rational simplex;
-  `.dense` disables pruning entirely. A `.dense` fallback runs at
-  the same `extraDeg` if the pruned variant doesn't certify, so the
-  choice is a speed/sparsity knob, not a completeness one. -/
 /-- Elaborator for `(config := …)` clauses on `sos`/`sos?`. -/
 declare_config_elab elabConfig Config
 
@@ -796,7 +775,11 @@ private def runSosTactic (parsed : SOS.Reify.ParsedGoal) (cfg : Config)
     | .infeasible =>
       pure (.infeasible gsCMv psCMv)
   let some result ← (SOS.Engine.solve cfg problem : IO _) |
-    throwError "{tag}: search failed to find a certificate"
+    let route := match parsed.shape with
+      | .closed => "a certificate"
+      | .strict => "a strict-positivity certificate"
+      | .infeasible => "an infeasibility certificate"
+    throwError "{tag}: search failed to find {route}"
   unless result.check problem do
     throwError "{tag}: internal error: search returned an invalid certificate"
   match result with

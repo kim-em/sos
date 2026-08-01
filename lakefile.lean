@@ -37,8 +37,7 @@ require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @ "main"
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4.git" @
-    "aaedc74a09fbe1da58b11cf4d27806a6fa1a86eb"
+  "https://github.com/leanprover-community/mathlib4.git" @ "v4.32.0-rc1-patch1"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @

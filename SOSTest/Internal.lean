@@ -9,7 +9,7 @@ or boundary inputs, so a refactor that mis-handles the empty / null
 case is caught here rather than only by the end-to-end `by sos`
 examples in `SOSTest.Examples`.
 -/
-import SOS
+import SOS.Engine
 
 open SOS CPoly
 
@@ -23,15 +23,15 @@ at the call site. -/
 
 #guard SOS.Search.niceDenominators.length = 31 + 62
 #guard (SOS.Search.niceDenominators.take 31) =
-    ((List.range 31).map (fun i => (i + 1 : ℚ)))
+    ((List.range 31).map fun i : Nat => Rat.ofInt (Int.ofNat (i + 1)))
 #guard (SOS.Search.niceDenominators.drop 31).take 6 =
-    [(32 : ℚ), 64, 128, 256, 512, 1024]
-#guard SOS.Search.niceDenominators.getLast? = some ((2 ^ 66 : ℚ))
+    [(32 : Rat), 64, 128, 256, 512, 1024]
+#guard SOS.Search.niceDenominators.getLast? = some ((2 ^ 66 : Rat))
 
 -- Pure powers only — the densified `3·2^(k-1)` entries are gone.
-#guard SOS.Search.niceDenominators.contains (31 : ℚ)
-#guard SOS.Search.niceDenominators.contains ((2 ^ 5 : ℚ))
-#guard !SOS.Search.niceDenominators.contains (96 : ℚ)
+#guard SOS.Search.niceDenominators.contains (31 : Rat)
+#guard SOS.Search.niceDenominators.contains ((2 ^ 5 : Rat))
+#guard !SOS.Search.niceDenominators.contains (96 : Rat)
 
 /-! ### `niceRound` regression: large-denominator precision
 
@@ -41,37 +41,37 @@ For denominators above roughly `2^53` this silently produced
 nonsense rationals (e.g. `niceRound (2^66) 1.0 = (2^64-1)/2^66 ≈
 1/4` instead of `1`). The exact-path fallback fixes this. -/
 
-#guard SOS.Search.niceRound ((2 ^ 66 : Nat) : ℚ) 1.0 = 1
-#guard SOS.Search.niceRound ((2 ^ 66 : Nat) : ℚ) 0.5 = 1 / 2
-#guard SOS.Search.niceRound ((2 ^ 60 : Nat) : ℚ) (-1.0) = -1
-#guard SOS.Search.niceRound ((2 ^ 49 : Nat) : ℚ) 1.0 = 1
+#guard SOS.Search.niceRound ((2 ^ 66 : Nat) : Rat) 1.0 = 1
+#guard SOS.Search.niceRound ((2 ^ 66 : Nat) : Rat) 0.5 = 1 / 2
+#guard SOS.Search.niceRound ((2 ^ 60 : Nat) : Rat) (-1.0) = -1
+#guard SOS.Search.niceRound ((2 ^ 49 : Nat) : Rat) 1.0 = 1
 -- Fast Float path still correct on schedule entries.
-#guard SOS.Search.niceRound ((2 ^ 24 : Nat) : ℚ) 1.0 = 1
-#guard SOS.Search.niceRound ((3 : ℚ)) 0.5 = 2 / 3
-#guard SOS.Search.niceRound ((3 : ℚ)) (-0.5) = -2 / 3
+#guard SOS.Search.niceRound ((2 ^ 24 : Nat) : Rat) 1.0 = 1
+#guard SOS.Search.niceRound ((3 : Rat)) 0.5 = 2 / 3
+#guard SOS.Search.niceRound ((3 : Rat)) (-0.5) = -2 / 3
 
 /-! ### Exact rational row reduction -/
 
 #guard
   let R := SOS.RatLinAlg.rref 2
-    #[#[(1 : ℚ), 1, 3],
-      #[(2 : ℚ), -1, 0]]
+    #[#[(1 : Rat), 1, 3],
+      #[(2 : Rat), -1, 0]]
   R.pivots = #[0, 1] ∧ R.freeCols = #[] ∧
-    R.rows = #[#[(1 : ℚ), 0, 1], #[(0 : ℚ), 1, 2]]
+    R.rows = #[#[(1 : Rat), 0, 1], #[(0 : Rat), 1, 2]]
 
 #guard
   let R := SOS.RatLinAlg.rref 3
-    #[#[(1 : ℚ), 1, 0, 0]]
+    #[#[(1 : Rat), 1, 0, 0]]
   R.pivots = #[0] ∧ R.freeCols = #[1, 2]
 
 #guard
   match SOS.RatLinAlg.eliminateAll 2
-      #[#[(1 : ℚ), 1, -3],
-        #[(2 : ℚ), -1, 0]] with
+      #[#[(1 : Rat), 1, -3],
+        #[(2 : Rat), -1, 0]] with
   | some E =>
       E.freeCols = #[] ∧
         E.assignments.map (fun (v, row) => (v, row)) =
-          #[(0, #[(0 : ℚ), 0, 1]), (1, #[(0 : ℚ), 0, 2])]
+          #[(0, #[(0 : Rat), 0, 1]), (1, #[(0 : Rat), 0, 2])]
   | none => false
 
 /-! ### `monomialsUpTo` -/
@@ -87,7 +87,7 @@ nonsense rationals (e.g. `niceRound (2^66) 1.0 = (2^64-1)/2^66 ≈
   | none => False
 
 #guard
-  let p : CMvPolynomial 1 ℚ :=
+  let p : CMvPolynomial 1 Rat :=
     CMvPolynomial.X ⟨0, by decide⟩
   match p.monomials with
   | [m] => p.coeff m = 1
@@ -96,12 +96,12 @@ nonsense rationals (e.g. `niceRound (2^66) 1.0 = (2^64-1)/2^66 ≈
 /-! ### Degenerate `decodeSdpBlock` / `LDL.reconstruct` -/
 
 #guard
-  match SOS.Search.decodeSdpBlock (1 : ℚ) 2 FloatArray.empty with
+  match SOS.Search.decodeSdpBlock (1 : Rat) 2 FloatArray.empty with
   | none => true
   | some _ => false
 
 #guard
-  match SOS.LDL.reconstruct 2 (#[] : Array ℚ)
-      (#[] : Array (CMvPolynomial 1 ℚ)) with
+  match SOS.LDL.reconstruct 2 (#[] : Array Rat)
+      (#[] : Array (CMvPolynomial 1 Rat)) with
   | none => true
   | some _ => false

@@ -2,10 +2,12 @@
 
 The source tree is already divided at the eventual package boundary:
 
-- `SOS/Engine.lean` and the modules it imports are the Mathlib-free native
-  package. They depend on `hex-mv-poly` and `csdp-ffi`.
-- `SOS/Mathlib/` is the prospective Mathlib contribution. Its only dependency
-  on the native side is the public `SOS.Engine` façade.
+- `SOS/Core.lean`, `SOS/Engine.lean`, and the modules they import are the
+  Mathlib-free native package. They depend on `hex-mv-poly`; the search side
+  behind `SOS.Engine` additionally depends on `csdp-ffi`.
+- `SOS/Mathlib/` is the prospective Mathlib contribution. Proof and
+  interpretation modules depend only on the stable `SOS.Core` interface; the
+  tactic frontend additionally imports the `SOS.Engine` solver façade.
 - `SOS/Mathlib.lean` is the in-repository umbrella for that directory.
 - The top-level `SOS.lean` intentionally imports both sides so existing users
   retain the single-import experience during the in-place phase.
@@ -16,7 +18,8 @@ The extraction is mechanical; it does not require another API redesign.
 
 1. Copy `SOS/Mathlib/*.lean` to `Mathlib/Tactic/SOS/*.lean`.
 2. Rewrite module imports from `SOS.Mathlib.X` to `Mathlib.Tactic.SOS.X`.
-   Imports of `SOS.Engine` remain imports of the required native package.
+   Imports of `SOS.Core` and `SOS.Engine` remain imports of the required native
+   package.
 3. Create `Mathlib/Tactic/SOS.lean` from `SOS/Mathlib.lean`, with the same
    module-path rewrite, and expose it from the desired Mathlib tactic umbrella.
 4. Add the native SOS package as a Lake dependency. The package supplies the

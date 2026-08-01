@@ -262,9 +262,12 @@ The tactic runs three stages on a `by sos` goal:
 | `SOS.Raw` | Mathlib-free `Poly.Raw` and typed `Poly n` ASTs. |
 | `SOS.Polynomial` | The narrow operational `Hex.MvPoly` API used by the engine. |
 | `SOS.Certificate` | `Goal n`, `SOSDecomp`, `Certificate n`, `checks` predicate. |
+| `SOS.Core` | Stable Mathlib-free data and executable-checking interface for proof-facing consumers. |
 | `SOS.LDL` | Rational LDLᵀ and Gram→weighted-square reconstruction. |
 | `SOS.Search` | Putinar-form SDP encoding, CSDP integration, rounding and reconstruction. |
-| `SOS.Engine` | Public `Config`, `Problem`, `Result`, `solve`, and deterministic `Result.check` façade. |
+| `SOS.Engine` | Native solver façade: public `Config`, `Problem`, `Result`, `solve`, and deterministic `Result.check`. |
+| `SOS.Mathlib.Raw` | Interpretation of the raw and typed polynomial syntax over `ℝ`. |
+| `SOS.Mathlib.Certificate` | Interpretation of certificate decompositions and checked identities over `ℝ`. |
 | `SOS.Mathlib.Polynomial` | Narrow real interpretation and operation-preservation lemmas. |
 | `SOS.Mathlib.Verifier` | Certificate/result soundness over `ℝ`. |
 | `SOS.Mathlib.Reify` | Atom-collecting Lean-`Expr` walker → `ParsedGoal`. |

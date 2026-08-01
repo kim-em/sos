@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Kim Morrison
 -/
 
-import SOS.Engine
+import SOS.Core
 import Mathlib.Algebra.MvPolynomial.Basic
 import Mathlib.Algebra.MvPolynomial.CommRing
 import Mathlib.Algebra.Algebra.Rat
@@ -42,36 +42,39 @@ private def monoEquiv : Mono n ≃ (Fin n →₀ Nat) where
     intro i
     simp
 
-@[simp] private theorem monoEquiv_apply (m : Mono n) (i : Fin n) :
+private theorem monoEquiv_apply (m : Mono n) (i : Fin n) :
     monoEquiv m i = m[i] := by
   rfl
 
-@[simp] private theorem monoEquiv_zero :
+private theorem monoEquiv_zero :
     monoEquiv (Mono.zero : Mono n) = 0 := by
   apply Finsupp.ext
   intro i
-  simp [Mono.zero]
+  simp [Mono.zero, monoEquiv_apply]
 
-@[simp] private theorem monoEquiv_mul (a b : Mono n) :
+private theorem monoEquiv_mul (a b : Mono n) :
     monoEquiv (Mono.mul a b) = monoEquiv a + monoEquiv b := by
   apply Finsupp.ext
   intro i
-  simp [Mono.mul]
+  simp [Mono.mul, monoEquiv_apply]
 
-@[simp] private theorem monoEquiv_unit (i : Fin n) :
+private theorem monoEquiv_unit (i : Fin n) :
     monoEquiv (Mono.unit i) = Finsupp.single i 1 := by
   apply Finsupp.ext
   intro j
-  by_cases h : j = i <;> simp [Mono.unit, h]
+  by_cases h : j = i <;> simp [Mono.unit, monoEquiv_apply, h]
 
 private def monoPairEquiv :
     (Mono n × Mono n) ≃ ((Fin n →₀ Nat) × (Fin n →₀ Nat)) :=
   Equiv.prodCongr monoEquiv monoEquiv
 
-@[simp] private theorem monoPairEmbedding_apply (ab : Mono n × Mono n) :
+private theorem monoPairEmbedding_apply (ab : Mono n × Mono n) :
     monoPairEquiv.toEmbedding ab =
       (monoEquiv ab.1, monoEquiv ab.2) := by
   rfl
+
+attribute [local simp] monoEquiv_apply monoEquiv_zero monoEquiv_mul
+  monoEquiv_unit monoPairEmbedding_apply
 
 /-- Interpret an SOS engine polynomial as a Mathlib multivariate polynomial.
 Only this one-way map is needed for soundness. -/
@@ -79,7 +82,7 @@ def toMvPolynomial (p : CMvPolynomial n Rat) : MvPolynomial (Fin n) Rat :=
   p.monomials.toFinset.sum fun m =>
     MvPolynomial.monomial (monoEquiv m) (Hex.MvPoly.coeff m p)
 
-@[simp] theorem coeff_toMvPolynomial (m : Mono n)
+private theorem coeff_toMvPolynomial (m : Mono n)
     (p : CMvPolynomial n Rat) :
     MvPolynomial.coeff (monoEquiv m) (toMvPolynomial p) =
       Hex.MvPoly.coeff m p := by
@@ -92,6 +95,8 @@ def toMvPolynomial (p : CMvPolynomial n Rat) : MvPolynomial (Fin n) Rat :=
         ((Hex.MvPoly.mem_monomials_iff m p).not.mp hm)
     simp [MvPolynomial.coeff_monomial, monoEquiv.injective.eq_iff,
       hm, hc]
+
+attribute [local simp] coeff_toMvPolynomial
 
 @[simp] theorem toMvPolynomial_zero :
     toMvPolynomial (0 : CMvPolynomial n Rat) = 0 := by

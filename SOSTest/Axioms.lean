@@ -8,3 +8,28 @@ import SOS.Mathlib.Verifier
 -/
 #guard_msgs in
 #print axioms SOS.sos_sound
+
+/-- info: 'SOS.sos_strict_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SOS.sos_strict_sound
+
+/-- info: 'SOS.sos_strict_product_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SOS.sos_strict_product_sound
+
+/-- info: 'SOS.sos_nonneg_refutation_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SOS.sos_nonneg_refutation_sound
+
+/-- info: 'SOS.sos_infeasible_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms SOS.sos_infeasible_sound
+
+/-- info: 'CPoly.CMvPolynomial.toMvPolynomial_mul' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms CPoly.CMvPolynomial.toMvPolynomial_mul

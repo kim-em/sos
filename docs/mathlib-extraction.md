@@ -41,7 +41,6 @@ The extraction is mechanical; it does not require another API redesign.
    boundary check remains useful after extraction and prevents accidental
    Mathlib imports from returning.
 
-Native link-argument propagation is deliberately independent of this source
-split. It must be clean enough that a Mathlib target importing the tactic does
-not repeat SOS/CSDP platform flags; that Lake packaging question is tracked
-separately.
+Native link-argument propagation is independent of this source split. The
+`csdp-ffi` package exports its resolved solver and bridge artifacts, so a
+Mathlib target importing the tactic does not repeat SOS/CSDP platform flags.

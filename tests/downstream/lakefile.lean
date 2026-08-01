@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 package sosDownstream where
-  /- Model a cache-producing consumer such as Mathlib. The proof oleans are
+  /- Model a cache-producing consumer such as Mathlib. Engine oleans are
   portable; CSDP remains a platform artifact owned by its provider package. -/
   platformIndependent := true
 

@@ -20,4 +20,4 @@ lake exe sosConsumer
 lake env lean SosConsumerTest.lean \
   --setup=.lake/build/ir/SosConsumerTest.setup.json
 
-echo "PASS: a portable downstream package builds and runs SOS without native link flags."
+echo "PASS: a portable downstream package builds and runs the SOS engine without native link flags."

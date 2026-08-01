@@ -1,4 +1,6 @@
-import SOS.Engine
+import SosConsumerPlain
 
-def main : IO Unit :=
-  IO.println "SOS downstream executable: OK"
+def main : IO Unit := do
+  unless ← SosConsumer.solveChecked do
+    throw <| IO.userError "SOS downstream solve or exact recheck failed"
+  IO.println "SOS downstream engine solve: OK"

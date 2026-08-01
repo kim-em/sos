@@ -6,8 +6,7 @@ Pure invariant checks for search / round / reconstruct helpers. These
 exercise internal helpers (`monomialsUpTo`, `decodeSdpBlock`,
 `LDL.reconstruct`, the rounding-denominator schedule) on degenerate
 or boundary inputs, so a refactor that mis-handles the empty / null
-case is caught here rather than only by the end-to-end `by sos`
-examples in `SOSTest.Examples`.
+case is caught here rather than only by an end-to-end engine solve.
 -/
 import SOS.Engine
 

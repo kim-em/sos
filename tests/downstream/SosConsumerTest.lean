@@ -1,3 +1,5 @@
-import SOS
+import SosConsumerPlain
 
-example (x y : ℝ) : 0 < x ^ 2 + y ^ 2 + 1 := by sos
+example : SosConsumer.polynomial =
+    (CPoly.CMvPolynomial.X 0 : CPoly.CMvPolynomial 1 Rat) ^ 2 + 1 := by
+  rfl

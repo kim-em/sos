@@ -10,7 +10,7 @@ namespace SOS
 open CPoly
 
 /-- Search configuration independent of any tactic frontend. Pass it to
-`Engine.solve`; the tactic accepts the same structure through
+`Engine.solve`; Mathlib's tactic accepts the same structure through
 `sos (config := { maxDepth := 3 })`.
 
 * `maxDepth` is the iterative-deepening cap. At each
@@ -108,7 +108,7 @@ def Result.check {n : Nat} (problem : Problem n) (result : Result n) : Bool :=
   | _, _ => false
 
 /-- Run the complete search policy for a reified problem. This owns all
-fallback choices so the Mathlib tactic frontend only reifies, invokes the
+fallback choices so Mathlib's tactic frontend only reifies, invokes the
 engine, rechecks the result, and constructs the corresponding proof. -/
 def solve {n : Nat} (cfg : SOS.Config) (problem : Problem n) :
     IO (Option (Result n)) := do

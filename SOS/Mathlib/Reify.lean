@@ -19,8 +19,7 @@ exponent), `Neg`, and the rational casts into ℝ. Anything else is
 opacified as an atom (an arbitrary ℝ-typed subterm tracked by index
 in the running `atoms` array).
 -/
-import SOS.Raw
-import SOS.Certificate
+import SOS.Engine
 import SOS.Mathlib.Raw
 import Lean
 

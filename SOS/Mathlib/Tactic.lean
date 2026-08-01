@@ -32,7 +32,7 @@ open Lean Elab Tactic Meta
   depth-1 retry unlocks the discriminant identity among others. Raise
   per-call for hard targets.
 * `maxRoundingDenomLog2` — base-2 log of the cap on rounding-denominator
-  candidates, filtered against `SOS.Search.niceDenominators`. The cap is
+  candidates in the engine schedule. The cap is
   `2 ^ maxRoundingDenomLog2`; the default exponent `66` is Harrison's
   `find_rounding` ceiling. Lower it to fail faster on goals you know
   won't round cleanly (e.g. `{ maxRoundingDenomLog2 := 40 }`).

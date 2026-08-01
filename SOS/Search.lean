@@ -233,7 +233,8 @@ end BasisStrategy
 
 /-- The basis-degree bound for σᵢ given target degree and gᵢ degree. -/
 @[inline] def multiplierBasisDeg (targetDeg : Nat) (gDeg : Nat) : Nat :=
-  if targetDeg < gDeg then 0 else halfCeil (targetDeg - gDeg)
+  let relaxDeg := 2 * halfCeil targetDeg
+  if relaxDeg < gDeg then 0 else (relaxDeg - gDeg) / 2
 
 /-- The cofactor basis-degree bound for an equality polynomial `pⱼ`.
 The cofactor `qⱼ` needs degree headroom up to `σ₀Deg − pⱼ.totalDegree`. -/

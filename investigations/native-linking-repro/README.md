@@ -86,25 +86,28 @@ the native dependency without a missing-symbol diagnostic.
 
 ## Consequence for CSDP
 
-Current Lake appears to have the necessary artifact propagation semantics.
-The promising CSDP packaging shape is:
+Current Lake has the necessary artifact-propagation semantics. The production
+implementation is in
+[`csdp-ffi` PR #6](https://github.com/leanprover/csdp-ffi/pull/6), pinned by
+SOS at its merge revision.
 
-1. compile the CSDP and Lean-wrapper objects into a combined private archive;
-2. build a custom platform-specific shared-library target from that archive,
-   resolving BLAS/LAPACK/Fortran (or Accelerate) in that build job;
-3. return a `Dynlib` for the resolved artifact;
-4. expose that target as `CSDP`'s `moreLinkLibs`;
-5. do not register the unresolved archive as an `extern_lib`, so downstream
-   executables do not also receive the static CSDP objects.
+The provider owns platform discovery, flags, runtime ordering, and native
+artifacts. Linux and macOS use a C-only resolved solver library plus a separate
+Lean bridge. Windows keeps the solver and bridge in one binary so allocations
+do not cross C-runtime heaps; distinct load and link names let Lake record the
+interpreter DLL while native targets consume the combined static archive.
+OpenBLAS is an explicit `Dynlib` dependency on Windows.
 
-The provider owns platform discovery and flags. Imported Lean libraries'
-`moreLinkLibs` are collected by downstream Lean-library and executable link
-steps, so SOS and Mathlib need no BLAS/LAPACK knowledge.
+The provider CI exercises plain and precompiled libraries, the test driver, a
+native executable, explicit module setup, editor loading on Linux, and
+platform-artifact restoration. Linux, macOS, and Windows all build and run the
+root and flag-free downstream solver fixtures. The Windows fixture also checks
+that the native executable does not import the interpreter bridge or Lean's
+shared runtime.
 
-This fixture validates the semantics on Linux. Before adopting the model in
-`csdp-ffi`, its implementation still needs Linux/macOS/Windows CI. In
-particular, Windows must either colocate runtime DLLs or describe them through
-`Dynlib.deps`, and the macOS target must resolve Accelerate while building the
-provider-owned dylib. The SOS/CSDP native artifact remains platform-specific;
-Mathlib oleans can remain platform-independent, with Lake regenerating module
-setup data against the per-platform dependency artifact.
+SOS therefore has no BLAS/LAPACK link configuration. Its own
+`platformIndependent := true` downstream fixture imports `SOS`, elaborates
+real `by sos` proofs, runs the Lake test driver and native executable, and uses
+explicit setup without native flags. The SOS/CSDP native artifact remains
+platform-specific; portable consumer oleans coexist with Lake-regenerated
+module setup against the per-platform provider artifact.

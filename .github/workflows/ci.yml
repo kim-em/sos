@@ -1,7 +1,6 @@
 name: CI
 
-# Linux-only. macOS and Windows runners would mirror the BLAS/LAPACK
-# install step from `kim-em/csdp-ffi`'s workflow.
+# Linux-only. Cross-platform native packaging is tested by `csdp-ffi` itself.
 
 on:
   push:
@@ -49,6 +48,9 @@ jobs:
 
       - name: Run tests
         run: lake test
+
+      - name: Test downstream package without native link flags
+        run: scripts/test_downstream.sh
 
       - name: Verify sorry/axiom-free
         run: |

@@ -10,7 +10,7 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "v0.1.0-mathlib-rc1"
+    "v0.1.0-mathlib-rc2"
 
 -- Keep the full Hex closure direct so downstream manifests retain the
 -- immutable semantic-version inputs rather than the mirrors' commit pins.

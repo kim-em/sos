@@ -19,8 +19,8 @@ exponent), `Neg`, and the rational casts into ℝ. Anything else is
 opacified as an atom (an arbitrary ℝ-typed subterm tracked by index
 in the running `atoms` array).
 -/
-import SOS.Raw
-import SOS.Certificate
+import SOS.Core
+import SOS.Mathlib.Raw
 import Lean
 
 namespace SOS.Reify
@@ -70,9 +70,9 @@ def natLit? (e : Expr) : MetaM (Option Nat) := do
   | _ => return none
 
 /-- Extract a rational from an `Expr`. -/
-partial def ratLit? (e : Expr) : MetaM (Option ℚ) := do
+partial def ratLit? (e : Expr) : MetaM (Option Rat) := do
   let e ← whnfR e
-  if let some n ← natLit? e then return some (n : ℚ)
+  if let some n ← natLit? e then return some (n : Rat)
   match_expr e with
   | Neg.neg _ _ a =>
     let some r ← ratLit? a | return none
@@ -90,10 +90,10 @@ partial def ratLit? (e : Expr) : MetaM (Option ℚ) := do
     return some r
   | Int.ofNat a =>
     let some n ← natLit? a | return none
-    return some (n : ℚ)
+    return some (n : Rat)
   | Int.negSucc a =>
     let some n ← natLit? a | return none
-    return some (-(n + 1) : ℚ)
+    return some (-(n + 1) : Rat)
   | _ => return none
 
 /-! ### Atom-collection monad
@@ -355,7 +355,7 @@ where
     match_expr goalType with
     | LE.le α _ a b =>
       -- Only ℝ-valued inequalities are in the supported fragment;
-      -- the lift pre-pass converts ℕ/ℤ/ℚ goals before we get here.
+      -- the lift pre-pass converts ℕ/ℤ/Rat goals before we get here.
       unless (← Meta.isDefEq α (Lean.mkConst ``Real)) do return none
       -- Fast path: `0 ≤ b` matches the canonical reified form directly.
       if let some r ← ratLit? a then

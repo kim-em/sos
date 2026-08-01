@@ -4,8 +4,11 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 Soundness theorems for SOS certificates.
 -/
-import SOS.Certificate
+import SOS.Mathlib.Certificate
+import SOS.Mathlib.Raw
+import SOS.Mathlib.Polynomial
 import Mathlib.Data.Real.Basic
+import Mathlib.Data.List.GetD
 import Mathlib.Algebra.Order.Ring.Defs
 import Mathlib.Tactic.Linarith
 
@@ -26,7 +29,6 @@ theorem Poly.evalReal_eq_aeval (φ : Fin n → ℝ) (p : SOS.Poly n) :
   induction p with
   | const r =>
     simp only [Poly.evalReal, Poly.toCMv, CMvPolynomial.aeval_C]
-    rfl
   | var i =>
     simp only [Poly.evalReal, Poly.toCMv, CMvPolynomial.aeval_X]
   | neg p ih =>
@@ -263,9 +265,9 @@ theorem sos_strict_sound
   have h_diff : 0 ≤ CMvPolynomial.aeval φ (p - CMvPolynomial.C ε) := by
     rw [hid]; exact cert.toPoly_aeval_nonneg gs ps φ hcoeffs hgs hps
   rw [CMvPolynomial.aeval_sub, CMvPolynomial.aeval_C] at h_diff
-  have hε_real : (0 : ℝ) < (algebraMap ℚ ℝ) ε := by
-    show (0 : ℝ) < (ε : ℝ); exact_mod_cast hε
-  linarith
+  have hε_real : (0 : ℝ) < (ε : ℝ) := by
+    exact_mod_cast hε
+  exact lt_of_lt_of_le hε_real (sub_nonneg.mp h_diff)
 
 /-- The strict-product witness polynomial `∏ strictGs` evaluates
 strictly positively when every `g ∈ strictGs` does. The base case

@@ -2,14 +2,12 @@
 Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
-import Mathlib.Data.Rat.Defs
-
 namespace SOS.RatLinAlg
 
 /-!
 # Small exact-rational linear algebra
 
-Dense Gauss-Jordan elimination over `ℚ`, used by the symmetric SOS
+Dense Gauss-Jordan elimination over `Rat`, used by the symmetric SOS
 path to eliminate polynomial-coefficient and Gram-symmetry equalities
 before calling CSDP.
 -/
@@ -18,7 +16,7 @@ before calling CSDP.
 `numVars + 1` entries, with the final entry the RHS. `pivots[i]` is the
 pivot column for `rows[i]`. -/
 structure Rref where
-  rows    : Array (Array ℚ)
+  rows    : Array (Array Rat)
   pivots  : Array Nat
   numVars : Nat
 
@@ -26,14 +24,14 @@ structure Rref where
 one `(pivot, expr)` per eliminated variable; `expr` is an augmented row
 with zero pivot coefficient and means `pivot = expr`. -/
 structure Elim where
-  assignments : Array (Nat × Array ℚ)
+  assignments : Array (Nat × Array Rat)
   freeCols    : Array Nat
   numVars     : Nat
 
 /-- Remove all-zero rows from a row-echelon form. -/
-private def nonzeroRows (numVars : Nat) (rows : Array (Array ℚ)) :
-    Array (Array ℚ) × Array Nat := Id.run do
-  let mut out : Array (Array ℚ) := #[]
+private def nonzeroRows (numVars : Nat) (rows : Array (Array Rat)) :
+    Array (Array Rat) × Array Nat := Id.run do
+  let mut out : Array (Array Rat) := #[]
   let mut pivots : Array Nat := #[]
   for row in rows do
     let mut pivot? : Option Nat := none
@@ -48,14 +46,14 @@ private def nonzeroRows (numVars : Nat) (rows : Array (Array ℚ)) :
       out := out.push row
   return (out, pivots)
 
-/-- Reduced row-echelon form of a dense augmented matrix over `ℚ`.
+/-- Reduced row-echelon form of a dense augmented matrix over `Rat`.
 Malformed rows are padded/truncated defensively via `getD 0`; callers in
 this repository always pass rows of length `numVars + 1`. -/
-def rref (numVars : Nat) (inputRows : Array (Array ℚ)) : Rref := Id.run do
+def rref (numVars : Nat) (inputRows : Array (Array Rat)) : Rref := Id.run do
   let width := numVars + 1
-  let mut rows : Array (Array ℚ) := #[]
+  let mut rows : Array (Array Rat) := #[]
   for row in inputRows do
-    let mut r : Array ℚ := Array.mkEmpty width
+    let mut r : Array Rat := Array.mkEmpty width
     for j in [0:width] do
       r := r.push (row[j]?.getD 0)
     rows := rows.push r
@@ -108,19 +106,19 @@ def Rref.inconsistent (R : Rref) : Bool := Id.run do
       return true
   return false
 
-private def addRows (r s : Array ℚ) : Array ℚ := Id.run do
+private def addRows (r s : Array Rat) : Array Rat := Id.run do
   let width := Nat.max r.size s.size
-  let mut out : Array ℚ := Array.mkEmpty width
+  let mut out : Array Rat := Array.mkEmpty width
   for j in [0:width] do
     out := out.push (r[j]?.getD 0 + s[j]?.getD 0)
   return out
 
-private def scaleRow (a : ℚ) (r : Array ℚ) : Array ℚ :=
+private def scaleRow (a : Rat) (r : Array Rat) : Array Rat :=
   r.map (fun x => a * x)
 
 /-- Choose the first non-zero variable coefficient in a dense augmented
 row. The RHS column is deliberately ignored. -/
-private def firstVar? (numVars : Nat) (row : Array ℚ) : Option Nat := Id.run do
+private def firstVar? (numVars : Nat) (row : Array Rat) : Option Nat := Id.run do
   for j in [0:numVars] do
     if row[j]?.getD 0 ≠ 0 then
       return some j
@@ -128,7 +126,7 @@ private def firstVar? (numVars : Nat) (row : Array ℚ) : Option Nat := Id.run d
 
 /-- Eliminate one variable from `row` using the original equation `eq`,
 whose pivot variable is `v` with coefficient `a`. -/
-private def eliminateFromRow (v : Nat) (a : ℚ) (eq row : Array ℚ) : Array ℚ :=
+private def eliminateFromRow (v : Nat) (a : Rat) (eq row : Array Rat) : Array Rat :=
   let b := row[v]?.getD 0
   if b = 0 then row
   else
@@ -144,16 +142,16 @@ the variables that remain in assignment right-hand sides as free
 parameters. This non-canonical coordinate chart is intentionally useful
 for SOS rounding: it matches Harrison's reduced SDP much more closely
 than lexicographic RREF coordinates. -/
-def eliminateAll (numVars : Nat) (inputRows : Array (Array ℚ)) :
+def eliminateAll (numVars : Nat) (inputRows : Array (Array Rat)) :
     Option Elim := Id.run do
   let width := numVars + 1
-  let mut future : Array (Array ℚ) := #[]
+  let mut future : Array (Array Rat) := #[]
   for row in inputRows do
-    let mut r : Array ℚ := Array.mkEmpty width
+    let mut r : Array Rat := Array.mkEmpty width
     for j in [0:width] do
       r := r.push (row[j]?.getD 0)
     future := future.push r
-  let mut assignments : Array (Nat × Array ℚ) := #[]
+  let mut assignments : Array (Nat × Array Rat) := #[]
   while !future.isEmpty do
     let eq := future[0]!
     future := future.extract 1 future.size
@@ -165,12 +163,12 @@ def eliminateAll (numVars : Nat) (inputRows : Array (Array ℚ)) :
       let a := eq[v]!
       let mut expr := scaleRow (-(1 / a)) eq
       expr := expr.set! v 0
-      let mut assignments' : Array (Nat × Array ℚ) := #[]
+      let mut assignments' : Array (Nat × Array Rat) := #[]
       for (w, row) in assignments do
         assignments' :=
           assignments'.push (w, eliminateFromRow v a eq row)
       assignments := assignments'.push (v, expr)
-      let mut future' : Array (Array ℚ) := #[]
+      let mut future' : Array (Array Rat) := #[]
       for row in future do
         let row' := eliminateFromRow v a eq row
         future' := future'.push row'

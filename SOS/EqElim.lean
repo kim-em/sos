@@ -3,7 +3,7 @@ Copyright (c) 2026 Kim Morrison. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 -/
 import SOS.Certificate
-import SOS.HexMvPolyCompat
+import SOS.Polynomial
 
 namespace SOS.EqElim
 
@@ -14,13 +14,13 @@ variable {n : Nat}
 /-- One equality-elimination step, recorded with the system state before
 the substitution so certificates can be lifted back exactly. -/
 structure ElimStep (n : Nat) where
-  targetBefore : CMvPolynomial n ℚ
-  gsBefore     : List (CMvPolynomial n ℚ)
-  psBefore     : List (CMvPolynomial n ℚ)
+  targetBefore : CMvPolynomial n Rat
+  gsBefore     : List (CMvPolynomial n Rat)
+  psBefore     : List (CMvPolynomial n Rat)
   dropIdx      : Nat
   var          : Fin n
-  coeff        : ℚ
-  rhs          : CMvPolynomial n ℚ
+  coeff        : Rat
+  rhs          : CMvPolynomial n Rat
 
 /-- One reconstruction step: either a real substitution, or dropping a
 constant-zero equality that arose after earlier substitutions. -/
@@ -42,32 +42,32 @@ private def unitMono (i : Fin n) : CMvMonomial n :=
 private def eraseVarMono (i : Fin n) (m : CMvMonomial n) : CMvMonomial n :=
   Vector.ofFn (fun j => if j = i then 0 else m.get j)
 
-private def powPoly (p : CMvPolynomial n ℚ) : Nat → CMvPolynomial n ℚ
+private def powPoly (p : CMvPolynomial n Rat) : Nat → CMvPolynomial n Rat
   | 0 => 1
   | k + 1 => p * powPoly p k
 
-private def substMap (i : Fin n) (expr : CMvPolynomial n ℚ) :
-    Fin n → CMvPolynomial n ℚ :=
+private def substMap (i : Fin n) (expr : CMvPolynomial n Rat) :
+    Fin n → CMvPolynomial n Rat :=
   fun j => if j = i then expr else CMvPolynomial.X j
 
-def substVar (i : Fin n) (expr : CMvPolynomial n ℚ)
-    (p : CMvPolynomial n ℚ) : CMvPolynomial n ℚ :=
+def substVar (i : Fin n) (expr : CMvPolynomial n Rat)
+    (p : CMvPolynomial n Rat) : CMvPolynomial n Rat :=
   CMvPolynomial.bind₁ (substMap i expr) p
 
 /-- Substitute `var := expr` in `p`, also returning the cofactor `q` such
 that `p = substVar var expr p + q * (coeff * (X var - expr))`. -/
-def substVarWithCof (var : Fin n) (expr : CMvPolynomial n ℚ) (coeff : ℚ)
-    (p : CMvPolynomial n ℚ) : CMvPolynomial n ℚ × CMvPolynomial n ℚ := Id.run do
+def substVarWithCof (var : Fin n) (expr : CMvPolynomial n Rat) (coeff : Rat)
+    (p : CMvPolynomial n Rat) : CMvPolynomial n Rat × CMvPolynomial n Rat := Id.run do
   let subst := substVar var expr p
-  let mut cof : CMvPolynomial n ℚ := 0
+  let mut cof : CMvPolynomial n Rat := 0
   for m in p.monomials do
     let k := m.get var
     if k = 0 then
       continue
     let c := p.coeff m
-    let base : CMvPolynomial n ℚ := CMvPolynomial.monomial (eraseVarMono var m) (c / coeff)
+    let base : CMvPolynomial n Rat := CMvPolynomial.monomial (eraseVarMono var m) (c / coeff)
     let x := CMvPolynomial.X var
-    let mut sum : CMvPolynomial n ℚ := 0
+    let mut sum : CMvPolynomial n Rat := 0
     for t in [0:k] do
       sum := sum + powPoly x (k - 1 - t) * powPoly expr t
     cof := cof + base * sum
@@ -76,19 +76,19 @@ def substVarWithCof (var : Fin n) (expr : CMvPolynomial n ℚ) (coeff : ℚ)
 private structure Candidate (n : Nat) where
   idx   : Nat
   var   : Fin n
-  coeff : ℚ
-  rhs   : CMvPolynomial n ℚ
+  coeff : Rat
+  rhs   : CMvPolynomial n Rat
   score : Nat
 
-private def varOccurrenceScore (var : Fin n) (target : CMvPolynomial n ℚ)
-    (gs ps : List (CMvPolynomial n ℚ)) : Nat :=
+private def varOccurrenceScore (var : Fin n) (target : CMvPolynomial n Rat)
+    (gs ps : List (CMvPolynomial n Rat)) : Nat :=
   let targetScore := if 0 < target.degreeOf var then 1 else 0
   let gsScore := gs.foldl (fun acc g => if 0 < g.degreeOf var then acc + 1 else acc) 0
   let psScore := ps.foldl (fun acc p => if 0 < p.degreeOf var then acc + 1 else acc) 0
   targetScore + gsScore + psScore
 
-private def candidatesFor (target : CMvPolynomial n ℚ)
-    (gs ps : List (CMvPolynomial n ℚ)) : List (Candidate n) := Id.run do
+private def candidatesFor (target : CMvPolynomial n Rat)
+    (gs ps : List (CMvPolynomial n Rat)) : List (Candidate n) := Id.run do
   let mut out : List (Candidate n) := []
   for idx in [0:ps.length] do
     let p := ps.getD idx 0
@@ -109,37 +109,37 @@ private def betterCandidate (a b : Candidate n) : Candidate n :=
   else if a.idx ≤ b.idx then a
   else b
 
-private def chooseCandidate (target : CMvPolynomial n ℚ)
-    (gs ps : List (CMvPolynomial n ℚ)) : Option (Candidate n) :=
+private def chooseCandidate (target : CMvPolynomial n Rat)
+    (gs ps : List (CMvPolynomial n Rat)) : Option (Candidate n) :=
   match candidatesFor target gs ps with
   | [] => none
   | c :: cs => some (cs.foldl betterCandidate c)
 
-private def findZeroIdx (ps : List (CMvPolynomial n ℚ)) : Option Nat := Id.run do
+private def findZeroIdx (ps : List (CMvPolynomial n Rat)) : Option Nat := Id.run do
   for idx in [0:ps.length] do
     if ps.getD idx 1 = 0 then
       return some idx
   return none
 
-private def removeIdx {α : Type*} (xs : List α) (idx : Nat) : List α :=
+private def removeIdx {α : Type} (xs : List α) (idx : Nat) : List α :=
   (xs.zipIdx.filter (fun pair => pair.2 != idx)).map (fun pair => pair.1)
 
-private def insertIdx {α : Type*} (xs : List α) (idx : Nat) (x : α) : List α :=
+private def insertIdx {α : Type} (xs : List α) (idx : Nat) (x : α) : List α :=
   let rec go : Nat → List α → List α
     | _, [] => [x]
     | 0, ys => x :: ys
     | k + 1, y :: ys => y :: go k ys
   go idx xs
 
-private def goalOfTarget (target : CMvPolynomial n ℚ) : Goal n :=
+private def goalOfTarget (target : CMvPolynomial n Rat) : Goal n :=
   .closed target
 
 /-- Iteratively eliminate equalities that are linear in a single variable
 whose remaining terms do not mention that variable. Returns `none` when no
 equality was eliminated. -/
 def eliminateEqualities (goal : Goal n)
-    (gs : List (CMvPolynomial n ℚ)) (ps : List (CMvPolynomial n ℚ)) :
-    Option (Goal n × List (CMvPolynomial n ℚ) × List (CMvPolynomial n ℚ) ×
+    (gs : List (CMvPolynomial n Rat)) (ps : List (CMvPolynomial n Rat)) :
+    Option (Goal n × List (CMvPolynomial n Rat) × List (CMvPolynomial n Rat) ×
       ReconstructMap n) := Id.run do
   if ps.isEmpty then return none
   let mut target := goal.target

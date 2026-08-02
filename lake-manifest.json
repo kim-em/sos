@@ -38,7 +38,7 @@
    "rev": "001e9c88696bf8678c9080aab5e75f30bd2198a3",
    "name": "CSDP",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "v0.1.0-mathlib-rc11",
+   "inputRev": "v0.1.0",
    "inherited": false,
    "configFile": "lakefile.lean"}],
  "name": "sos",

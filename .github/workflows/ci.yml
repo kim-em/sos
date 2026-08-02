@@ -1,7 +1,5 @@
 name: CI
 
-# Linux-only. Cross-platform native packaging is tested by `csdp-ffi` itself.
-
 on:
   push:
     branches: [main]
@@ -13,50 +11,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  linux:
-    name: Linux (Ubuntu)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install elan
+  engine:
+    name: Engine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
         shell: bash
-        run: |
-          set -e
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
-          sh elan-init.sh -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Fetch dependencies
-        run: lake update
-
-      - name: Check CSDP native dependencies
-        run: |
-          cd .lake/packages/CSDP
-          lake script run checkNativeDeps
-
-      - name: Fetch and verify the CSDP platform release
-        run: |
-          lake build @CSDP:release
-          lake build --no-build --rehash CSDP
-
-      - name: Check Mathlib-free boundary
-        run: scripts/check_mathlib_boundary.sh
-
-      - name: Build SOS
-        run: lake build SOS
-
-      - name: Run tests
-        run: lake test
-
-      - name: Test downstream package without native link flags
-        run: scripts/test_downstream.sh
-
-      - name: Verify sorry/axiom-free
-        run: |
-          if grep -rn '\bsorry\b\|^\s*axiom' SOS/; then
-            echo "FAIL: sorry or axiom found in SOS/"
-            exit 1
-          fi
-          echo "PASS: SOS/ has no sorry or axiom."
+      - name: Validate release-backed engine
+        run: ./scripts/validate_release_engine.sh

@@ -11,10 +11,7 @@ cd "$repo_root"
 export PATH="$HOME/.elan/bin:$PATH"
 
 lake update
-(
-  cd .lake/packages/CSDP
-  lake script run checkNativeDeps
-)
+lake script run CSDP/checkNativeDeps
 lake build @CSDP:release
 lake build --no-build --rehash CSDP
 scripts/check_mathlib_boundary.sh

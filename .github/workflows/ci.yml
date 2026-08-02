@@ -5,6 +5,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -18,11 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install BLAS / LAPACK
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liblapack-dev libblas-dev gfortran
 
       - name: Install elan
         shell: bash
@@ -39,6 +35,11 @@ jobs:
         run: |
           cd .lake/packages/CSDP
           lake script run checkNativeDeps
+
+      - name: Fetch and verify the CSDP platform release
+        run: |
+          lake build @CSDP:release
+          lake build --no-build --rehash CSDP
 
       - name: Check Mathlib-free boundary
         run: scripts/check_mathlib_boundary.sh

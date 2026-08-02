@@ -10,7 +10,8 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "v0.1.0-mathlib-rc4"
+    "v0.1.0-mathlib-rc8"
+  with NameMap.empty.insert `csdpPortable "true"
 
 -- Keep the full Hex closure direct so downstream manifests retain the
 -- immutable semantic-version inputs rather than the mirrors' commit pins.
@@ -20,7 +21,7 @@ require HexBasic from git
 
 require HexPoly from git
   "https://github.com/leanprover/hex-poly.git" @
-    "v0.1.0-mathlib-rc1"
+    "v0.1.0-mathlib-rc2"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @

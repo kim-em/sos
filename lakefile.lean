@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 package sos where
-  version := v!"0.2.2"
+  version := v!"0.2.3"
   description := "A Mathlib-free sum-of-squares search engine for Lean 4."
   keywords := #["math", "software-verification", "sos", "sdp"]
   license := "Apache-2.0"
@@ -10,7 +10,7 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "v0.1.1"
+    "v0.1.2"
   with NameMap.empty.insert `csdpPortable "true"
 
 -- Keep the full Hex closure direct so downstream manifests retain the

@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 package sos where
-  version := v!"0.2.1"
+  version := v!"0.2.2"
   description := "A Mathlib-free sum-of-squares search engine for Lean 4."
   keywords := #["math", "software-verification", "sos", "sdp"]
   license := "Apache-2.0"
@@ -17,15 +17,15 @@ require CSDP from git
 -- immutable semantic-version inputs rather than the mirrors' commit pins.
 require HexBasic from git
   "https://github.com/leanprover/hex-basic.git" @
-    "v0.1.0"
+    "v0.1.1"
 
 require HexPoly from git
   "https://github.com/leanprover/hex-poly.git" @
-    "v0.1.0"
+    "v0.1.1"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @
-    "v0.1.0"
+    "v0.1.1"
 
 -- We do not set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has

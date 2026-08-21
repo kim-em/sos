@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 package sos where
-  version := v!"0.2.3"
+  version := v!"0.2.4"
   description := "A Mathlib-free sum-of-squares search engine for Lean 4."
   keywords := #["math", "software-verification", "sos", "sdp"]
   license := "Apache-2.0"

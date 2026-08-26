@@ -10,14 +10,14 @@ package sos where
 
 require CSDP from git
   "https://github.com/leanprover/csdp-ffi" @
-    "2844bb8ff2af63fb977c949f4178e7e2e5c82f3d"
+    "eb41f276101847dd799c703e2378a544591aebf4"
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4.git" @ "v4.32.0-rc1-patch1"
+  "https://github.com/leanprover-community/mathlib4.git" @ "v4.33.1"
 
 require HexMvPoly from git
   "https://github.com/leanprover/hex-mv-poly.git" @
-    "abd64dac3b4e517b09412db5fc089d7443a4590d"
+    "e25a580e1c8ee59d66408031bcb74ed5aca05b95"
 
 -- We don't set `precompileModules := true` on SOS itself: the FFI
 -- (`@[extern]` declarations) lives in `CSDP.Basic`, which has
